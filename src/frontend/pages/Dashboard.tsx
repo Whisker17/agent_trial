@@ -1,16 +1,18 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { usePrivy } from '@privy-io/react-auth';
 import { useAgents } from '../hooks/use-agents';
 import { AgentCard } from '../components/AgentCard';
 
 export const Dashboard: React.FC = () => {
   const { data: agents, isLoading, error } = useAgents();
+  const { user } = usePrivy();
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-foreground">Agents</h1>
+          <h1 className="text-xl font-bold text-foreground">My Agents</h1>
           <p className="text-sm text-muted-foreground">
             Manage your autonomous AI agents on Mantle
           </p>

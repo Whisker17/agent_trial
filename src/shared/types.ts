@@ -1,5 +1,23 @@
 export type AgentStatus = 'created' | 'running' | 'stopped' | 'error';
 
+export interface AgentOnChainMeta {
+  erc8004?: {
+    registered: boolean;
+    registryAddress: string;
+    agentId: string;
+    txHash: string;
+    network: 'mantle' | 'mantleSepolia';
+  };
+  governanceToken?: {
+    address: string;
+    name: string;
+    symbol: string;
+    supply: string;
+    txHash: string;
+    network: 'mantle' | 'mantleSepolia';
+  };
+}
+
 export interface AgentConfig {
   name: string;
   persona: string;
@@ -20,6 +38,8 @@ export interface AgentRecord {
   walletAddress: string;
   encryptedPrivateKey: string;
   creatorAddress: string | null;
+  userId: string | null;
+  onChainMeta: string;
   status: AgentStatus;
   createdAt: string;
   updatedAt: string;
@@ -40,7 +60,10 @@ export interface AgentPublic {
     mantle: string;
     mantleSepolia: string;
   };
+  onChainMeta?: AgentOnChainMeta;
 }
+
+export type SkillTier = 'system' | 'base' | 'service' | 'private';
 
 export interface SkillArgument {
   description: string;
@@ -57,6 +80,7 @@ export interface SkillMetadata {
   tags: string[];
   requiresTools: string[];
   arguments?: Record<string, SkillArgument>;
+  tier: SkillTier;
   isSystem: boolean;
 }
 
@@ -66,6 +90,9 @@ export interface Skill {
 }
 
 export function toAgentPublic(record: AgentRecord): AgentPublic {
+  const onChainMeta = record.onChainMeta ? JSON.parse(record.onChainMeta) : undefined;
+  const isEmpty = !onChainMeta || Object.keys(onChainMeta).length === 0;
+
   return {
     id: record.id,
     name: record.name,
@@ -77,5 +104,6 @@ export function toAgentPublic(record: AgentRecord): AgentPublic {
     status: record.status,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+    onChainMeta: isEmpty ? undefined : onChainMeta,
   };
 }

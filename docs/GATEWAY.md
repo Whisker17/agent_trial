@@ -169,27 +169,43 @@ arguments:
 | `requires_tools` | No       | Documents which generic tools the skill references    |
 | `arguments`      | No       | Per-skill config parameters shown in Builder UI       |
 
-### 4.2 Skill Categories
+### 4.2 Skill Categories (Four-Tier Architecture)
 
-Skills are organized by directory convention:
+Skills are organized into four tiers by directory convention:
 
 ```
 skills/
-  _system/                    # Always injected — never shown in Builder UI
+  _system/                    # Tier 1: Always injected, hidden from UI
     mantle_chain_basics.md    # Chain IDs, RPC URLs, MNT gas, explorer links
     tool_usage_guide.md       # Overview of available MCP/EVM tools
-  agent_identity.md           # Selectable — ERC-8004 registration SOP
-  contract_deploy.md          # Selectable — ERC-20/721 deployment guide
-  defi_yield.md               # Selectable — DeFi yield queries
-  ens_lookup.md               # Selectable — ENS resolution workflows
-  blockscout_explorer.md      # Selectable — On-chain exploration
+    skills-creator/           # Meta-skill bundle for generating new skills
+      SKILL.md                #   Entry point (registered by SkillRegistry)
+      scripts/                #   init_skill.py, package_skill.py, quick_validate.py
+      references/             #   workflows.md, output-patterns.md
+  base/                       # Tier 2: Opt-in at agent creation (Builder UI)
+    mantle_8004_base.md       # ERC-8004 Trustless Agents reference
+  service/                    # Tier 3: Marketplace skills (x402 payments)
+  private/                    # Tier 4: Owner-only, per-agent
 ```
 
-- Files inside `_system/` are **always injected** into every agent's knowledge.
-  They provide foundational context (chain details, tool inventory) that all
-  agents need regardless of selected skills.
-- All other `.md` files are **selectable** — shown in the Builder UI. Users
-  check the ones they want, and only those get injected.
+| Tier | Directory | Injection | Visibility | Mutability |
+|------|-----------|-----------|------------|------------|
+| **System** | `_system/` | Always, silent | Hidden from Builder UI | Immutable, platform-maintained |
+| **Base** | `base/` | Opt-in at agent creation | Shown in Builder UI (not selected by default) | Immutable, platform/community curated |
+| **Service** | `service/` | Via A2A marketplace + x402 | Discoverable via marketplace | Published by agents, reviewed |
+| **Private** | `private/` | Owner-only, per-agent | Not visible to others | Mutable by owner agent |
+
+- **Tier 1 (System):** Always injected into every agent's knowledge. Provides
+  foundational context (chain details, tool inventory, skill creation) that all
+  agents need regardless of configuration. Not shown in any UI.
+- **Tier 2 (Base):** Shown in the Builder UI as checkboxes. Users explicitly
+  select the capabilities they want. These are stable, well-tested modules
+  (identity registration, contract deployment, token launch).
+- **Tier 3 (Service):** Published to the Agent API Marketplace. Other agents
+  discover and pay for these via x402 micropayments. Security-reviewed before
+  listing.
+- **Tier 4 (Private):** User-generated skills created via the Skill Creator.
+  Only loaded by the owning agent. Not published to any marketplace.
 - Adding a new capability = committing a new `.md` file. Zero TypeScript.
 
 ### 4.3 SkillRegistry
@@ -197,13 +213,22 @@ skills/
 The `SkillRegistry` is a server-side module that:
 
 1. On startup, scans the `skills/` directory recursively for `.md` files.
-2. Parses YAML frontmatter from each file using `gray-matter`.
-3. Exposes:
-   - `listSelectableSkills(): SkillMetadata[]` — for `GET /api/skills`
-   - `listSystemSkills(): SkillMetadata[]` — internal use
+2. **Skill bundle detection:** If a directory contains a `SKILL.md` file, it is
+   treated as a skill bundle — only `SKILL.md` is registered as the skill entry
+   point; other `.md` files (e.g. `references/`) and subdirectories are skipped.
+   This allows skills to bundle scripts, reference docs, and assets without
+   polluting the registry.
+3. Parses YAML frontmatter from each skill file using `gray-matter`.
+4. Determines tier from directory path: `_system/` → system, `base/` → base,
+   `service/` → service, `private/` → private.
+5. Exposes:
+   - `listByTier(tier: SkillTier): SkillMetadata[]` — filter by tier
+   - `listSelectable(): SkillMetadata[]` — base + service (for Builder UI / marketplace)
+   - `listSystem(): SkillMetadata[]` — system tier only
+   - `getSystemContents(): string[]` — all system skill markdown bodies
    - `getSkillContent(id: string): string` — returns the full markdown body
    - `getSkillMetadata(id: string): SkillMetadata` — returns parsed frontmatter
-4. Optionally watches the directory for changes (hot-reload in development).
+6. Optionally watches the directory for changes (hot-reload in development).
 
 ---
 
@@ -433,6 +458,8 @@ interface AgentConfig {
 ### 8.2 SkillMetadata (Parsed from YAML frontmatter)
 
 ```typescript
+type SkillTier = 'system' | 'base' | 'service' | 'private';
+
 interface SkillMetadata {
   id: string;
   name: string;
@@ -446,7 +473,8 @@ interface SkillMetadata {
     description: string;
     required: boolean;
   }>;
-  isSystem: boolean;
+  tier: SkillTier;
+  isSystem: boolean;    // derived: tier === 'system'
 }
 ```
 
@@ -498,23 +526,27 @@ Base URL: `/api`
 
 #### `GET /api/skills`
 
-List all selectable skills (excludes system skills).
+List selectable skills (base + service tiers). Supports optional `?tier=base|service` query parameter for filtering.
+
+**Query Parameters:**
+
+| Param | Values | Default |
+|-------|--------|---------|
+| `tier` | `base`, `service` | Returns both if omitted |
 
 **Response `200`:**
 ```json
 {
   "skills": [
     {
-      "id": "agent_identity",
-      "name": "agent_identity",
-      "description": "Register, manage, and query ERC-8004 agent identities on Mantle.",
-      "version": "2.0.0",
-      "author": "mantlency",
-      "tags": ["crypto", "identity", "eip8004"],
-      "requiresTools": ["erc8004_register", "erc8004_get_config", "get_balance"],
-      "arguments": {
-        "agent_name": { "description": "Name for the agent identity", "required": false }
-      }
+      "id": "mantle_8004_base",
+      "name": "mantle_8004_base",
+      "description": "Complete ERC-8004 Trustless Agents reference: Identity, Reputation, Validation registries.",
+      "version": "1.0.0",
+      "author": "mantle-aaas",
+      "tags": ["erc8004", "identity", "reputation", "validation", "registry"],
+      "requiresTools": ["plugin-evm"],
+      "tier": "base"
     }
   ]
 }
@@ -765,9 +797,9 @@ A single-page form with sections:
 
 1. **Identity** — Agent name (text input), Persona (textarea)
 2. **Model** — Model provider selector (OpenRouter / OpenAI / Ollama)
-3. **Skills** — Checkbox grid fetched from `GET /api/skills`. Each skill
-   displays name, description, and tags. Selecting a skill may reveal its
-   `arguments` for additional configuration.
+3. **Skills** — Checkbox grid fetched from `GET /api/skills?tier=base`. Each
+   skill displays name, description, and tags (none selected by default).
+   Selecting a skill may reveal its `arguments` for additional configuration.
 4. **Creator** — "Connect Wallet" button (optional). If connected, the
    address is attached as `creatorAddress`.
 5. **Deploy** — "Deploy Agent" button. Calls `POST /api/agents` and
@@ -854,15 +886,15 @@ mantle-agent/
 │       │   └── use-chat.ts          # Chat state management
 │       ├── api.ts                   # API client
 │       └── utils.ts                 # cn() helper
-├── skills/                          # THE knowledge layer
-│   ├── _system/
+├── skills/                          # THE knowledge layer (4-tier architecture)
+│   ├── _system/                     # Tier 1: Always injected, hidden
 │   │   ├── mantle_chain_basics.md
-│   │   └── tool_usage_guide.md
-│   ├── agent_identity.md            # Already exists
-│   ├── contract_deploy.md
-│   ├── defi_yield.md
-│   ├── ens_lookup.md
-│   └── blockscout_explorer.md
+│   │   ├── tool_usage_guide.md
+│   │   └── skills-creator/          # Skill bundle (SKILL.md + scripts/ + references/)
+│   ├── base/                        # Tier 2: Opt-in at creation (Builder UI)
+│   │   └── mantle_8004_base.md
+│   ├── service/                     # Tier 3: Marketplace skills (x402)
+│   └── private/                     # Tier 4: Owner-only, per-agent
 ├── docs/
 │   ├── GATEWAY.md                   # This file
 │   └── DESIGN.md                    # Ecosystem design (unchanged)

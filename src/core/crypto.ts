@@ -11,9 +11,10 @@ function getEncryptionKey(): Buffer {
       'PLATFORM_ENCRYPTION_KEY is required. Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"',
     );
   }
-  const buf = Buffer.from(hex, 'hex');
+  const raw = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const buf = Buffer.from(raw, 'hex');
   if (buf.length !== 32) {
-    throw new Error('PLATFORM_ENCRYPTION_KEY must be a 64-character hex string (32 bytes)');
+    throw new Error('PLATFORM_ENCRYPTION_KEY must be a 64-character hex string (32 bytes). Got ' + raw.length + ' chars.');
   }
   return buf;
 }

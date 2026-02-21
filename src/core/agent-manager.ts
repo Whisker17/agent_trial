@@ -1,4 +1,4 @@
-import { AgentRuntime, type IAgentRuntime, type Plugin, logger } from '@elizaos/core';
+import { AgentRuntime, type IAgentRuntime, resolvePlugins } from '@elizaos/core';
 import { decrypt } from './crypto.ts';
 import { buildCharacter } from './character-factory.ts';
 import type { SkillRegistry } from './skill-registry.ts';
@@ -50,17 +50,39 @@ export class AgentManager {
 
     const privateKey = decrypt(record.encryptedPrivateKey);
     const character = buildCharacter(record, privateKey, this.registry);
+    const resolvedCharacterPlugins = await resolvePlugins(character.plugins ?? []);
+    const runtimePlugins = [...resolvedCharacterPlugins];
+    if (!runtimePlugins.some((plugin) => plugin.name === mantlePlugin.name)) {
+      runtimePlugins.push(mantlePlugin);
+    }
+    console.log(
+      `[agent-manager] Runtime plugins for "${record.name}": ${runtimePlugins
+        .map((plugin) => plugin.name)
+        .join(', ')}`,
+    );
 
     const runtime = new AgentRuntime({
       agentId: agentId as any,
       character,
-      plugins: [mantlePlugin],
+      plugins: runtimePlugins,
     });
 
     patchGetSettingForObjects(runtime);
 
     try {
-      await runtime.initialize();
+      const sqlPlugin = runtimePlugins.find(
+        (plugin) => plugin.name === '@elizaos/plugin-sql',
+      );
+      if (sqlPlugin) {
+        await runtime.registerPlugin(sqlPlugin);
+        const adapter = (runtime as any).adapter;
+        if (adapter && !(await adapter.isReady())) {
+          await adapter.init();
+        }
+        await runtime.runPluginMigrations();
+      }
+
+      await runtime.initialize({ skipMigrations: !!sqlPlugin });
       this.running.set(agentId, { runtime, startedAt: new Date() });
       repo.setAgentStatus(agentId, 'running');
       console.log(`[agent-manager] Started agent "${record.name}" (${agentId})`);

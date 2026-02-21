@@ -1,9 +1,14 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, basename, relative } from 'node:path';
 import matter from 'gray-matter';
-import type { SkillMetadata, Skill } from '../shared/types.ts';
+import type { SkillMetadata, SkillTier, Skill } from '../shared/types.ts';
 
-const SYSTEM_DIR = '_system';
+const TIER_DIRS: Record<string, SkillTier> = {
+  _system: 'system',
+  base: 'base',
+  service: 'service',
+  private: 'private',
+};
 
 export class SkillRegistry {
   private skills = new Map<string, Skill>();
@@ -20,23 +25,38 @@ export class SkillRegistry {
     this.scanDirectory(this.skillsDir);
   }
 
+  private resolveTier(relPath: string): SkillTier {
+    for (const [dir, tier] of Object.entries(TIER_DIRS)) {
+      if (relPath.startsWith(dir + '/') || relPath.startsWith(dir + '\\')) {
+        return tier;
+      }
+    }
+    return 'base';
+  }
+
   private scanDirectory(dir: string): void {
-    for (const entry of readdirSync(dir)) {
+    const entries = readdirSync(dir);
+    const isSkillBundle = entries.includes('SKILL.md');
+
+    for (const entry of entries) {
       const fullPath = join(dir, entry);
       const stat = statSync(fullPath);
 
       if (stat.isDirectory()) {
-        this.scanDirectory(fullPath);
+        if (!isSkillBundle) {
+          this.scanDirectory(fullPath);
+        }
         continue;
       }
 
       if (!entry.endsWith('.md')) continue;
+      if (isSkillBundle && entry !== 'SKILL.md') continue;
 
       const rawContent = readFileSync(fullPath, 'utf-8');
       const { data, content } = matter(rawContent);
 
       const relPath = relative(this.skillsDir, fullPath);
-      const isSystem = relPath.startsWith(SYSTEM_DIR + '/') || relPath.startsWith(SYSTEM_DIR + '\\');
+      const tier = this.resolveTier(relPath);
       const id = data.name || basename(entry, '.md');
 
       const metadata: SkillMetadata = {
@@ -49,23 +69,28 @@ export class SkillRegistry {
         tags: Array.isArray(data.tags) ? data.tags : [],
         requiresTools: Array.isArray(data.requires_tools) ? data.requires_tools : [],
         arguments: data.arguments ? normalizeArguments(data.arguments) : undefined,
-        isSystem,
+        tier,
+        isSystem: tier === 'system',
       };
 
       this.skills.set(id, { metadata, content: content.trim() });
     }
   }
 
+  listByTier(tier: SkillTier): SkillMetadata[] {
+    return [...this.skills.values()]
+      .filter((s) => s.metadata.tier === tier)
+      .map((s) => s.metadata);
+  }
+
   listSelectable(): SkillMetadata[] {
     return [...this.skills.values()]
-      .filter((s) => !s.metadata.isSystem)
+      .filter((s) => s.metadata.tier === 'base' || s.metadata.tier === 'service')
       .map((s) => s.metadata);
   }
 
   listSystem(): SkillMetadata[] {
-    return [...this.skills.values()]
-      .filter((s) => s.metadata.isSystem)
-      .map((s) => s.metadata);
+    return this.listByTier('system');
   }
 
   getSkill(id: string): Skill | undefined {
@@ -82,7 +107,7 @@ export class SkillRegistry {
 
   getSystemContents(): string[] {
     return [...this.skills.values()]
-      .filter((s) => s.metadata.isSystem)
+      .filter((s) => s.metadata.tier === 'system')
       .map((s) => s.content);
   }
 

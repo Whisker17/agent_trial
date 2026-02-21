@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAgent, useStartAgent, useStopAgent, useDeleteAgent } from '../hooks/use-agents';
 import { WalletDisplay } from '../components/WalletDisplay';
 import { cn } from '../utils';
+import { ApiError, isDeleteSweepError } from '../api';
 
 const STATUS_COLORS: Record<string, string> = {
   running: 'bg-green-500/15 text-green-400',
@@ -11,6 +12,11 @@ const STATUS_COLORS: Record<string, string> = {
   error: 'bg-red-500/15 text-red-400',
 };
 
+const EXPLORERS = {
+  mantle: 'https://mantlescan.xyz',
+  mantleSepolia: 'https://sepolia.mantlescan.xyz',
+} as const;
+
 export const AgentDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -18,6 +24,7 @@ export const AgentDetail: React.FC = () => {
   const startAgent = useStartAgent();
   const stopAgent = useStopAgent();
   const deleteAgent = useDeleteAgent();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -41,9 +48,26 @@ export const AgentDetail: React.FC = () => {
   const canStart = agent.status === 'created' || agent.status === 'stopped' || agent.status === 'error';
 
   const handleDelete = async () => {
-    if (!confirm(`Delete agent "${agent.name}"? This cannot be undone.`)) return;
-    await deleteAgent.mutateAsync(agent.id);
-    navigate('/');
+    setDeleteError(null);
+    const ok = confirm(
+      `Delete agent "${agent.name}"?\n\nBefore deletion, the server will attempt to sweep this agent wallet's assets (MNT + configured ERC20 tokens on Mantle Mainnet and Sepolia) to your creator address.\n\nDeletion is blocked if any transfer fails.`,
+    );
+    if (!ok) return;
+
+    try {
+      await deleteAgent.mutateAsync(agent.id);
+      navigate('/dashboard');
+    } catch (err: unknown) {
+      if (isDeleteSweepError(err)) {
+        setDeleteError(`${err.message}\n${JSON.stringify(err.details, null, 2)}`);
+        return;
+      }
+      if (err instanceof ApiError) {
+        setDeleteError(err.message);
+        return;
+      }
+      setDeleteError(err instanceof Error ? err.message : 'Delete failed');
+    }
   };
 
   return (
@@ -113,6 +137,11 @@ export const AgentDetail: React.FC = () => {
           Failed to start agent. Check server logs for details.
         </div>
       )}
+      {deleteError && (
+        <div className="max-h-56 overflow-y-auto overflow-x-auto break-words whitespace-pre-wrap rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-sm text-red-400">
+          {deleteError}
+        </div>
+      )}
 
       {/* Wallet */}
       <WalletDisplay address={agent.walletAddress} balance={agent.balance} />
@@ -162,6 +191,55 @@ export const AgentDetail: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* On-Chain Metadata */}
+      {agent.onChainMeta && (
+        <div className="space-y-4">
+          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
+            On-Chain
+          </h2>
+          <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+            {agent.onChainMeta.erc8004 && (
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase">ERC-8004 Identity</p>
+                <p className="text-xs text-foreground mt-1">
+                  {agent.onChainMeta.erc8004.registered
+                    ? `Registered on ${agent.onChainMeta.erc8004.network === 'mantle' ? 'Mantle Mainnet' : 'Mantle Sepolia'}`
+                    : 'Registration status unknown'}
+                </p>
+                <p className="font-mono text-xs text-foreground mt-0.5 break-all">
+                  Agent ID: {agent.onChainMeta.erc8004.agentId}
+                </p>
+                <p className="font-mono text-xs text-foreground mt-1 break-all">
+                  Registry: {agent.onChainMeta.erc8004.registryAddress}
+                </p>
+                <p className="font-mono text-xs text-muted-foreground mt-0.5 break-all">
+                  Tx: {agent.onChainMeta.erc8004.txHash}
+                </p>
+                <a
+                  href={`${EXPLORERS[agent.onChainMeta.erc8004.network]}/tx/${agent.onChainMeta.erc8004.txHash}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-primary hover:underline"
+                >
+                  View transaction on explorer
+                </a>
+              </div>
+            )}
+            {agent.onChainMeta.governanceToken && (
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase">Governance Token</p>
+                <p className="text-sm text-foreground mt-1">
+                  {agent.onChainMeta.governanceToken.name} ({agent.onChainMeta.governanceToken.symbol})
+                </p>
+                <p className="font-mono text-xs text-muted-foreground mt-0.5 break-all">
+                  {agent.onChainMeta.governanceToken.address}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

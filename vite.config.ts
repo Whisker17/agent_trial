@@ -9,6 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   plugins: [tailwindcss(), react()],
   root: 'src/frontend',
+  envDir: path.resolve(__dirname),
   build: {
     outDir: '../../dist/frontend',
     emptyOutDir: true,
@@ -25,6 +26,9 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+  },
+  define: {
+    global: 'globalThis',
   },
   server: {
     port: 5173,

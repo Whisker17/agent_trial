@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { serveStatic } from 'hono/bun';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { existsSync } from 'node:fs';
 import { SkillRegistry } from '../core/skill-registry.ts';
 import { AgentManager } from '../core/agent-manager.ts';
+import { authMiddleware } from './middleware/auth.ts';
 import { createSkillRoutes } from './routes/skills.ts';
 import { createAgentRoutes } from './routes/agents.ts';
 import { createChatRoutes } from './routes/chat.ts';
@@ -27,6 +28,9 @@ export function createApp() {
   );
 
   app.route('/api', createSkillRoutes(registry));
+
+  app.use('/api/agents', authMiddleware);
+  app.use('/api/agents/*', authMiddleware);
   app.route('/api', createAgentRoutes(manager));
   app.route('/api', createChatRoutes(manager));
 

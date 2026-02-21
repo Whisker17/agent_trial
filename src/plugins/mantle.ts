@@ -22,6 +22,7 @@ import { mantle, mantleSepoliaTestnet } from 'viem/chains';
 import { ERC20_SOURCE } from '../contracts/erc20.ts';
 import { ERC721_SOURCE } from '../contracts/erc721.ts';
 import { compileSolidity } from '../contracts/compiler.ts';
+import { noProxyFetch } from '../core/no-proxy-fetch.ts';
 
 function getPrivateKey(runtime: IAgentRuntime): `0x${string}` {
   const key =
@@ -50,14 +51,17 @@ function getRpcUrl(chain: Chain): string {
 }
 
 function publicClient(chain: Chain) {
-  return createPublicClient({ chain, transport: http(getRpcUrl(chain)) });
+  return createPublicClient({
+    chain,
+    transport: http(getRpcUrl(chain), { fetchFn: noProxyFetch }),
+  });
 }
 
 function walletClient(runtime: IAgentRuntime, chain: Chain) {
   return createWalletClient({
     account: privateKeyToAccount(getPrivateKey(runtime)),
     chain,
-    transport: http(getRpcUrl(chain)),
+    transport: http(getRpcUrl(chain), { fetchFn: noProxyFetch }),
   });
 }
 

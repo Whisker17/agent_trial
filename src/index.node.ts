@@ -1,10 +1,9 @@
+import { serve } from '@hono/node-server';
 import { noProxyFetch } from './core/no-proxy-fetch.ts';
 import { createApp } from './server/app.ts';
 import { getDatabase } from './db/index.ts';
 
-// Replace Bun's native fetch globally. Bun on macOS auto-detects system proxy
-// via CFNetwork, causing UnsupportedProxyProtocol. noProxyFetch uses node:https
-// which does not go through CFNetwork.
+// Force all outbound HTTP calls through our transport implementation.
 globalThis.fetch = noProxyFetch;
 
 process.env.NO_PROXY = '*';
@@ -19,16 +18,30 @@ getDatabase();
 
 const { app, registry, manager } = createApp();
 
-process.on('SIGINT', async () => {
+const server = serve(
+  {
+    fetch: app.fetch,
+    port: PORT,
+  },
+  (info) => {
+    console.log(`Started development server: http://${info.address}:${info.port}`);
+  },
+);
+
+async function shutdown() {
   console.log('\nShutting down...');
   await manager.stopAll();
+  await new Promise<void>((resolve, reject) => {
+    server.close((err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
   process.exit(0);
-});
+}
 
-process.on('SIGTERM', async () => {
-  await manager.stopAll();
-  process.exit(0);
-});
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 console.log(`
   ┌─────────────────────────────────────────┐
@@ -39,8 +52,3 @@ console.log(`
   │  Database:    data/gateway.db           │
   └─────────────────────────────────────────┘
 `);
-
-export default {
-  port: PORT,
-  fetch: app.fetch,
-};

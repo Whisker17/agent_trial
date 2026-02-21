@@ -46,6 +46,10 @@ export function buildCharacter(
   const skillSummary = selectedMetas
     .map((m) => `- [${m!.name}]: ${m!.description}`)
     .join('\n');
+  const postgresUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+  const sqlSettings = postgresUrl
+    ? { POSTGRES_URL: postgresUrl }
+    : { PGLITE_DATA_DIR: process.env.PGLITE_DATA_DIR || '.eliza/gateway-runtime-db' };
 
   const systemPrompt = [
     record.persona,
@@ -78,6 +82,7 @@ export function buildCharacter(
       '@fleek-platform/eliza-plugin-mcp',
     ],
     settings: {
+      ...sqlSettings,
       chains: { evm: ['mantle', 'mantleSepoliaTestnet'] },
       mcp: { servers: MCP_SERVERS },
     },

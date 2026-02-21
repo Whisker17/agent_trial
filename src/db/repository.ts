@@ -1,5 +1,5 @@
 import { getDatabase } from './index.ts';
-import type { AgentRecord, AgentStatus } from '../shared/types.ts';
+import type { AgentRecord, AgentStatus, AgentOnChainMeta } from '../shared/types.ts';
 
 interface AgentRow {
   id: string;
@@ -11,6 +11,8 @@ interface AgentRow {
   wallet_address: string;
   encrypted_private_key: string;
   creator_address: string | null;
+  user_id: string | null;
+  on_chain_meta: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -27,6 +29,8 @@ function rowToRecord(row: AgentRow): AgentRecord {
     walletAddress: row.wallet_address,
     encryptedPrivateKey: row.encrypted_private_key,
     creatorAddress: row.creator_address,
+    userId: row.user_id,
+    onChainMeta: row.on_chain_meta,
     status: row.status as AgentStatus,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -43,12 +47,13 @@ export function createAgent(params: {
   walletAddress: string;
   encryptedPrivateKey: string;
   creatorAddress: string | null;
+  userId: string | null;
 }): AgentRecord {
   const db = getDatabase();
   db.run(
     `INSERT INTO agents (id, name, persona, model_provider, skills, skill_args,
-       wallet_address, encrypted_private_key, creator_address)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       wallet_address, encrypted_private_key, creator_address, user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       params.id,
       params.name,
@@ -59,19 +64,32 @@ export function createAgent(params: {
       params.walletAddress,
       params.encryptedPrivateKey,
       params.creatorAddress,
+      params.userId,
     ],
   );
   return getAgent(params.id)!;
 }
 
-export function getAgent(id: string): AgentRecord | null {
+export function getAgent(id: string, userId?: string): AgentRecord | null {
   const db = getDatabase();
+  if (userId) {
+    const row = db
+      .query('SELECT * FROM agents WHERE id = ? AND user_id = ?')
+      .get(id, userId) as AgentRow | null;
+    return row ? rowToRecord(row) : null;
+  }
   const row = db.query('SELECT * FROM agents WHERE id = ?').get(id) as AgentRow | null;
   return row ? rowToRecord(row) : null;
 }
 
-export function listAgents(): AgentRecord[] {
+export function listAgents(userId?: string): AgentRecord[] {
   const db = getDatabase();
+  if (userId) {
+    const rows = db
+      .query('SELECT * FROM agents WHERE user_id = ? ORDER BY created_at DESC')
+      .all(userId) as AgentRow[];
+    return rows.map(rowToRecord);
+  }
   const rows = db.query('SELECT * FROM agents ORDER BY created_at DESC').all() as AgentRow[];
   return rows.map(rowToRecord);
 }
@@ -85,6 +103,7 @@ export function updateAgent(
     skills: string[];
     skillArgs: Record<string, Record<string, string>>;
     status: AgentStatus;
+    onChainMeta: AgentOnChainMeta;
   }>,
 ): AgentRecord | null {
   const db = getDatabase();
@@ -114,6 +133,10 @@ export function updateAgent(
   if (fields.status !== undefined) {
     sets.push('status = ?');
     values.push(fields.status);
+  }
+  if (fields.onChainMeta !== undefined) {
+    sets.push('on_chain_meta = ?');
+    values.push(JSON.stringify(fields.onChainMeta));
   }
 
   if (sets.length === 0) return getAgent(id);
