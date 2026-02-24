@@ -131,8 +131,32 @@ export interface CreateAgentPayload {
   persona: string;
   modelProvider: string;
   skills: string[];
+  skillArgs?: Record<string, Record<string, string>>;
   creatorAddress?: string;
   autoStart?: boolean;
+}
+
+export interface SocialConfigPayload {
+  base: {
+    commandPrefix: string;
+    responseVisibility: 'public' | 'ephemeral';
+    enableDmFallback: boolean;
+  };
+  telegram: {
+    enabled: boolean;
+    botToken: string;
+    allowedChatIds: string;
+    defaultChatId: string;
+    webhookMode: 'polling' | 'webhook';
+  };
+  discord: {
+    enabled: boolean;
+    botToken: string;
+    guildId: string;
+    controlChannelId: string;
+    notifyChannelId: string;
+    adminRoleIds: string;
+  };
 }
 
 let _getToken: (() => Promise<string | null>) | null = null;
@@ -275,4 +299,18 @@ export async function chatWithAgent(
     }),
   );
   return data.response;
+}
+
+export async function testSocialConnection(
+  platform: 'telegram' | 'discord',
+  token: string,
+): Promise<{ success: boolean; platform: 'telegram' | 'discord'; account: unknown }> {
+  const headers = { ...(await authHeaders()), 'Content-Type': 'application/json' };
+  return json<{ success: boolean; platform: 'telegram' | 'discord'; account: unknown }>(
+    await fetch(`${API}/agents/social/test`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ platform, token }),
+    }),
+  );
 }

@@ -19,6 +19,19 @@ import type { AgentManager } from '../../core/agent-manager.ts';
 import * as repo from '../../db/repository.ts';
 import { toAgentPublic, type AgentRecord } from '../../shared/types.ts';
 import {
+  getSocialSupport,
+  hasSocialArgs,
+  normalizeSocialConfigInput,
+  readSocialConfigFromSkillArgs,
+  stripSocialArgs,
+  toSkillArgsMap,
+  validateSocialConfig,
+  writeSocialSkillArgs,
+  SOCIAL_BASE_SKILL,
+  SOCIAL_DISCORD_SKILL,
+  SOCIAL_TELEGRAM_SKILL,
+} from '../social-config.ts';
+import {
   validateTransferTokenConfig,
   type AssetNetwork,
 } from '../../config/transfer-tokens.ts';
@@ -380,6 +393,146 @@ function preflightSweep(
   };
 }
 
+type SkillArgsMap = Record<string, Record<string, string>>;
+type SocialTestPlatform = 'telegram' | 'discord';
+
+function normalizeSkillIds(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return input.filter((item): item is string => typeof item === 'string');
+}
+
+function parseRecordSkillIds(record: AgentRecord): string[] {
+  try {
+    return normalizeSkillIds(JSON.parse(record.skills));
+  } catch {
+    return [];
+  }
+}
+
+function parseRecordSkillArgs(record: AgentRecord): SkillArgsMap {
+  try {
+    return toSkillArgsMap(JSON.parse(record.skillArgs || '{}'));
+  } catch {
+    return {};
+  }
+}
+
+function mergeSkillArgs(existing: SkillArgsMap, incoming: SkillArgsMap): SkillArgsMap {
+  const merged: SkillArgsMap = { ...existing };
+  for (const [skillId, args] of Object.entries(incoming)) {
+    merged[skillId] = { ...(merged[skillId] || {}), ...args };
+  }
+  return merged;
+}
+
+function prepareSkillArgsForPersist(params: {
+  selectedSkills: string[];
+  existingSkillArgs?: SkillArgsMap;
+  incomingSkillArgs: unknown;
+}):
+  | { ok: true; skillArgs: SkillArgsMap }
+  | { ok: false; errors: string[] } {
+  const existing = params.existingSkillArgs || {};
+  const incoming = toSkillArgsMap(params.incomingSkillArgs || {});
+  let merged = mergeSkillArgs(existing, incoming);
+
+  const support = getSocialSupport(params.selectedSkills);
+  if (!support.any) {
+    return { ok: true, skillArgs: stripSocialArgs(merged) };
+  }
+
+  if (!hasSocialArgs(merged)) {
+    return {
+      ok: false,
+      errors: ['Social skills are selected, but social configuration is missing.'],
+    };
+  }
+
+  const { config: currentConfig, tokenState } = readSocialConfigFromSkillArgs(existing);
+  const normalized = normalizeSocialConfigInput({
+    [SOCIAL_BASE_SKILL]: merged[SOCIAL_BASE_SKILL],
+    [SOCIAL_TELEGRAM_SKILL]: {
+      ...merged[SOCIAL_TELEGRAM_SKILL],
+      bot_token: merged[SOCIAL_TELEGRAM_SKILL]?.bot_token || currentConfig.telegram.botToken,
+    },
+    [SOCIAL_DISCORD_SKILL]: {
+      ...merged[SOCIAL_DISCORD_SKILL],
+      bot_token: merged[SOCIAL_DISCORD_SKILL]?.bot_token || currentConfig.discord.botToken,
+    },
+  });
+
+  const validation = validateSocialConfig(normalized, {
+    support,
+    requireAnyEnabled: true,
+    tokenState,
+  });
+  if (!validation.ok) {
+    return { ok: false, errors: validation.errors };
+  }
+
+  merged = writeSocialSkillArgs(merged, normalized, { encrypt });
+  return { ok: true, skillArgs: merged };
+}
+
+async function testTelegramToken(token: string): Promise<{
+  ok: boolean;
+  payload: Record<string, unknown>;
+}> {
+  const response = await noProxyFetch(`https://api.telegram.org/bot${token}/getMe`, {
+    method: 'POST',
+  });
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok || payload.ok !== true) {
+    return {
+      ok: false,
+      payload: {
+        error: 'Telegram token verification failed.',
+        code: 'SOCIAL_TEST_FAILED',
+        details: payload,
+      },
+    };
+  }
+  return {
+    ok: true,
+    payload: {
+      success: true,
+      platform: 'telegram',
+      account: payload.result || null,
+    },
+  };
+}
+
+async function testDiscordToken(token: string): Promise<{
+  ok: boolean;
+  payload: Record<string, unknown>;
+}> {
+  const response = await noProxyFetch('https://discord.com/api/v10/users/@me', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bot ${token}`,
+    },
+  });
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    return {
+      ok: false,
+      payload: {
+        error: 'Discord token verification failed.',
+        code: 'SOCIAL_TEST_FAILED',
+        details: payload,
+      },
+    };
+  }
+  return {
+    ok: true,
+    payload: {
+      success: true,
+      platform: 'discord',
+      account: payload,
+    },
+  };
+}
+
 export function createAgentRoutes(manager: AgentManager) {
   const app = new Hono();
 
@@ -396,6 +549,21 @@ export function createAgentRoutes(manager: AgentManager) {
     const account = privateKeyToAccount(privateKey);
     const walletAddress = account.address;
     const encryptedPrivateKey = encrypt(privateKey);
+    const selectedSkills = normalizeSkillIds(skills);
+    const preparedSkillArgs = prepareSkillArgsForPersist({
+      selectedSkills,
+      incomingSkillArgs: skillArgs || {},
+    });
+    if (!preparedSkillArgs.ok) {
+      return c.json(
+        {
+          error: 'Invalid social configuration.',
+          code: 'INVALID_SOCIAL_CONFIG',
+          details: { errors: preparedSkillArgs.errors },
+        },
+        400,
+      );
+    }
 
     const id = crypto.randomUUID();
     const record = repo.createAgent({
@@ -403,8 +571,8 @@ export function createAgentRoutes(manager: AgentManager) {
       name,
       persona,
       modelProvider: modelProvider || 'openrouter',
-      skills: Array.isArray(skills) ? skills : [],
-      skillArgs: skillArgs || {},
+      skills: selectedSkills,
+      skillArgs: preparedSkillArgs.skillArgs,
       walletAddress,
       encryptedPrivateKey,
       creatorAddress: creatorAddress || null,
@@ -438,6 +606,30 @@ export function createAgentRoutes(manager: AgentManager) {
     return c.json({ agents });
   });
 
+  app.post('/agents/social/test', async (c) => {
+    const body = await c.req.json();
+    const platform = body?.platform as SocialTestPlatform | undefined;
+    const token = typeof body?.token === 'string' ? body.token.trim() : '';
+
+    if ((platform !== 'telegram' && platform !== 'discord') || !token) {
+      return c.json(
+        {
+          error: 'platform and token are required',
+          code: 'INVALID_SOCIAL_TEST_PAYLOAD',
+        },
+        400,
+      );
+    }
+
+    if (platform === 'telegram') {
+      const result = await testTelegramToken(token);
+      return c.json(result.payload, result.ok ? 200 : 400);
+    }
+
+    const result = await testDiscordToken(token);
+    return c.json(result.payload, result.ok ? 200 : 400);
+  });
+
   app.get('/agents/:id', async (c) => {
     const id = c.req.param('id');
     const userId: string | undefined = c.get('userId');
@@ -459,6 +651,138 @@ export function createAgentRoutes(manager: AgentManager) {
     return c.json({ agent });
   });
 
+  app.get('/agents/:id/social', (c) => {
+    const id = c.req.param('id');
+    const userId: string | undefined = c.get('userId');
+    const record = repo.getAgent(id, userId);
+    if (!record) return c.json({ error: 'Agent not found' }, 404);
+
+    const selectedSkills = parseRecordSkillIds(record);
+    const skillArgs = parseRecordSkillArgs(record);
+    const { config, tokenState } = readSocialConfigFromSkillArgs(skillArgs);
+
+    return c.json({
+      social: {
+        support: getSocialSupport(selectedSkills),
+        config: {
+          ...config,
+          telegram: { ...config.telegram, botToken: '' },
+          discord: { ...config.discord, botToken: '' },
+        },
+        tokenState,
+      },
+    });
+  });
+
+  app.patch('/agents/:id/social', async (c) => {
+    const id = c.req.param('id');
+    const userId: string | undefined = c.get('userId');
+    const existing = repo.getAgent(id, userId);
+    if (!existing) return c.json({ error: 'Agent not found' }, 404);
+
+    if (manager.isRunning(id)) {
+      return c.json({ error: 'Cannot update social config while agent is running.' }, 409);
+    }
+
+    const body = await c.req.json();
+    const selectedSkills = parseRecordSkillIds(existing);
+    const currentSkillArgs = parseRecordSkillArgs(existing);
+    const socialPayload = body?.social ?? body;
+    const normalized = normalizeSocialConfigInput(socialPayload);
+    const incomingSkillArgs = {
+      [SOCIAL_BASE_SKILL]: {
+        command_prefix: normalized.base.commandPrefix,
+        response_visibility: normalized.base.responseVisibility,
+        enable_dm_fallback: String(normalized.base.enableDmFallback),
+        enabled_platforms: normalized.base.platforms.join(','),
+        telegram_enabled: String(normalized.telegram.enabled),
+        telegram_bot_token: normalized.telegram.botToken,
+        telegram_allowed_chat_ids: normalized.telegram.allowedChatIds.join(','),
+        telegram_default_chat_id: normalized.telegram.defaultChatId,
+        telegram_webhook_mode: normalized.telegram.webhookMode,
+        discord_enabled: String(normalized.discord.enabled),
+        discord_bot_token: normalized.discord.botToken,
+        discord_guild_id: normalized.discord.guildId,
+        discord_control_channel_id: normalized.discord.controlChannelId,
+        discord_notify_channel_id: normalized.discord.notifyChannelId,
+        discord_admin_role_ids: normalized.discord.adminRoleIds.join(','),
+      },
+    };
+    const prepared = prepareSkillArgsForPersist({
+      selectedSkills,
+      existingSkillArgs: currentSkillArgs,
+      incomingSkillArgs,
+    });
+    if (!prepared.ok) {
+      return c.json(
+        {
+          error: 'Invalid social configuration.',
+          code: 'INVALID_SOCIAL_CONFIG',
+          details: { errors: prepared.errors },
+        },
+        400,
+      );
+    }
+
+    const updated = repo.updateAgent(id, { skillArgs: prepared.skillArgs });
+    const read = readSocialConfigFromSkillArgs(prepared.skillArgs);
+    return c.json({
+      social: {
+        support: getSocialSupport(selectedSkills),
+        config: {
+          ...read.config,
+          telegram: { ...read.config.telegram, botToken: '' },
+          discord: { ...read.config.discord, botToken: '' },
+        },
+        tokenState: read.tokenState,
+      },
+      agent: updated ? toAgentPublic(updated) : null,
+    });
+  });
+
+  app.post('/agents/:id/social/test', async (c) => {
+    const id = c.req.param('id');
+    const userId: string | undefined = c.get('userId');
+    const record = repo.getAgent(id, userId);
+    if (!record) return c.json({ error: 'Agent not found' }, 404);
+
+    const body = await c.req.json();
+    const platform = body?.platform as SocialTestPlatform | undefined;
+    if (platform !== 'telegram' && platform !== 'discord') {
+      return c.json(
+        { error: 'platform must be telegram or discord', code: 'INVALID_SOCIAL_TEST_PAYLOAD' },
+        400,
+      );
+    }
+
+    const providedToken = typeof body?.token === 'string' ? body.token.trim() : '';
+    const skillArgs = parseRecordSkillArgs(record);
+    const current = readSocialConfigFromSkillArgs(skillArgs, { decrypt });
+    const resolvedToken =
+      providedToken ||
+      (platform === 'telegram'
+        ? current.config.telegram.botToken
+        : current.config.discord.botToken);
+
+    if (!resolvedToken) {
+      return c.json(
+        {
+          error: `No ${platform} token configured.`,
+          code: 'SOCIAL_TOKEN_MISSING',
+        },
+        400,
+      );
+    }
+
+    if (platform === 'telegram') {
+      const result = await testTelegramToken(resolvedToken);
+      return c.json(result.payload, result.ok ? 200 : 400);
+    }
+
+    const result = await testDiscordToken(resolvedToken);
+    return c.json(result.payload, result.ok ? 200 : 400);
+  });
+
   app.patch('/agents/:id', async (c) => {
     const id = c.req.param('id');
     const userId: string | undefined = c.get('userId');
@@ -470,12 +794,35 @@ export function createAgentRoutes(manager: AgentManager) {
     }
 
     const body = await c.req.json();
+    const hasSkillMutation = body.skills !== undefined || body.skillArgs !== undefined;
+    let nextSkillArgs: SkillArgsMap | undefined;
+    if (hasSkillMutation) {
+      const selectedSkills =
+        body.skills !== undefined ? normalizeSkillIds(body.skills) : parseRecordSkillIds(existing);
+      const prepared = prepareSkillArgsForPersist({
+        selectedSkills,
+        existingSkillArgs: parseRecordSkillArgs(existing),
+        incomingSkillArgs: body.skillArgs || {},
+      });
+      if (!prepared.ok) {
+        return c.json(
+          {
+            error: 'Invalid social configuration.',
+            code: 'INVALID_SOCIAL_CONFIG',
+            details: { errors: prepared.errors },
+          },
+          400,
+        );
+      }
+      nextSkillArgs = prepared.skillArgs;
+    }
+
     const updated = repo.updateAgent(id, {
       name: body.name,
       persona: body.persona,
       modelProvider: body.modelProvider,
-      skills: body.skills,
-      skillArgs: body.skillArgs,
+      skills: body.skills !== undefined ? normalizeSkillIds(body.skills) : undefined,
+      skillArgs: nextSkillArgs,
       onChainMeta: body.onChainMeta,
     });
 

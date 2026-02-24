@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePrivy } from '@privy-io/react-auth';
 import { useQueryClient } from '@tanstack/react-query';
@@ -11,14 +11,126 @@ import { StepBasicInfo } from '../components/wizard/StepBasicInfo';
 import { StepSkills } from '../components/wizard/StepSkills';
 import { StepOnChain, type OnChainConfig } from '../components/wizard/StepOnChain';
 import { StepReview, type DeployPhase } from '../components/wizard/StepReview';
+import { StepSocial } from '../components/wizard/StepSocial';
 import { cn } from '../utils';
-
-const STEPS = ['Basic Info', 'Skills', 'On-Chain', 'Review'];
 const AUTO_TOPUP_BUFFER_WEI = parseEther('0.002');
 const EXPLORERS = {
   mantle: 'https://mantlescan.xyz',
   mantleSepolia: 'https://sepolia.mantlescan.xyz',
 } as const;
+
+interface SocialSupport {
+  any: boolean;
+  telegram: boolean;
+  discord: boolean;
+}
+
+const DEFAULT_SOCIAL_CONFIG: api.SocialConfigPayload = {
+  base: {
+    commandPrefix: '/',
+    responseVisibility: 'public',
+    enableDmFallback: true,
+  },
+  telegram: {
+    enabled: true,
+    botToken: '',
+    allowedChatIds: '',
+    defaultChatId: '',
+    webhookMode: 'polling',
+  },
+  discord: {
+    enabled: false,
+    botToken: '',
+    guildId: '',
+    controlChannelId: '',
+    notifyChannelId: '',
+    adminRoleIds: '',
+  },
+};
+
+function getSocialSupport(selectedSkills: string[]): SocialSupport {
+  const hasSocial = selectedSkills.includes('social_apps_integration_base');
+  return {
+    any: hasSocial,
+    telegram: hasSocial,
+    discord: hasSocial,
+  };
+}
+
+function splitCsv(value: string): string[] {
+  return value
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildSocialSkillArgs(
+  config: api.SocialConfigPayload,
+  support: SocialSupport,
+): Record<string, Record<string, string>> {
+  if (!support.any) return {};
+
+  const enabledPlatforms = [
+    ...(config.telegram.enabled && support.telegram ? (['telegram'] as const) : []),
+    ...(config.discord.enabled && support.discord ? (['discord'] as const) : []),
+  ];
+
+  return {
+    social_apps_integration_base: {
+      command_prefix: config.base.commandPrefix.trim() || '/',
+      response_visibility: config.base.responseVisibility,
+      enable_dm_fallback: String(config.base.enableDmFallback),
+      enabled_platforms: enabledPlatforms.join(','),
+      telegram_enabled: String(config.telegram.enabled && support.telegram),
+      telegram_bot_token: config.telegram.botToken.trim(),
+      telegram_allowed_chat_ids: splitCsv(config.telegram.allowedChatIds).join(','),
+      telegram_default_chat_id: config.telegram.defaultChatId.trim(),
+      telegram_webhook_mode: config.telegram.webhookMode,
+      discord_enabled: String(config.discord.enabled && support.discord),
+      discord_bot_token: config.discord.botToken.trim(),
+      discord_guild_id: config.discord.guildId.trim(),
+      discord_control_channel_id: config.discord.controlChannelId.trim(),
+      discord_notify_channel_id: config.discord.notifyChannelId.trim(),
+      discord_admin_role_ids: splitCsv(config.discord.adminRoleIds).join(','),
+    },
+  };
+}
+
+function validateSocialStep(
+  config: api.SocialConfigPayload,
+  support: SocialSupport,
+): string[] {
+  if (!support.any) return [];
+
+  const errors: string[] = [];
+  const telegramEnabled = support.telegram && config.telegram.enabled;
+  const discordEnabled = support.discord && config.discord.enabled;
+
+  if (!telegramEnabled && !discordEnabled) {
+    errors.push('Enable at least one social platform.');
+  }
+
+  if (!config.base.commandPrefix.trim()) {
+    errors.push('Command prefix is required.');
+  }
+
+  if (telegramEnabled) {
+    if (!config.telegram.botToken.trim()) {
+      errors.push('Telegram bot token is required.');
+    }
+  }
+
+  if (discordEnabled) {
+    if (!config.discord.botToken.trim()) {
+      errors.push('Discord bot token is required.');
+    }
+    if (!config.discord.guildId.trim()) {
+      errors.push('Discord guild ID is required.');
+    }
+  }
+
+  return errors;
+}
 
 function networkLabel(network: 'mantle' | 'mantleSepolia'): string {
   return network === 'mantle' ? 'Mantle Mainnet' : 'Mantle Sepolia';
@@ -57,6 +169,9 @@ export const AgentWizard: React.FC = () => {
   const [persona, setPersona] = useState('');
   const [model, setModel] = useState('openrouter');
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [socialConfig, setSocialConfig] = useState<api.SocialConfigPayload>(
+    DEFAULT_SOCIAL_CONFIG,
+  );
   const [onChainConfig, setOnChainConfig] = useState<OnChainConfig>({
     enableErc8004: false,
     erc8004Network: 'mantleSepolia',
@@ -72,20 +187,52 @@ export const AgentWizard: React.FC = () => {
   const [createdWalletAddress, setCreatedWalletAddress] = useState<string | null>(null);
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
   const [erc8004Result, setErc8004Result] = useState<Erc8004Result | null>(null);
+  const socialSupport = getSocialSupport(selectedSkills);
+  const steps = socialSupport.any
+    ? ['Basic Info', 'Skills', 'Social Apps', 'On-Chain', 'Review']
+    : ['Basic Info', 'Skills', 'On-Chain', 'Review'];
+  const socialStepIndex = socialSupport.any ? 2 : -1;
+  const onChainStepIndex = socialSupport.any ? 3 : 2;
+  const reviewStepIndex = socialSupport.any ? 4 : 3;
+  const socialValidationErrors = validateSocialStep(socialConfig, socialSupport);
+
+  useEffect(() => {
+    setSocialConfig((prev) => {
+      const next = {
+        ...prev,
+        telegram: { ...prev.telegram, enabled: socialSupport.telegram ? prev.telegram.enabled : false },
+        discord: { ...prev.discord, enabled: socialSupport.discord ? prev.discord.enabled : false },
+      };
+      if (socialSupport.any && !next.telegram.enabled && !next.discord.enabled) {
+        if (socialSupport.telegram) next.telegram.enabled = true;
+        else if (socialSupport.discord) next.discord.enabled = true;
+      }
+      return next;
+    });
+  }, [socialSupport.any, socialSupport.telegram, socialSupport.discord]);
 
   const canProceed = () => {
     if (step === 0) return name.trim() && persona.trim();
+    if (step === socialStepIndex) {
+      return socialValidationErrors.length === 0;
+    }
     return true;
   };
 
   const handleDeploy = useCallback(async () => {
     if (deployPhase !== 'idle') return;
+    const validationErrors = socialValidationErrors;
+    if (validationErrors.length > 0) {
+      if (socialStepIndex >= 0) setStep(socialStepIndex);
+      return;
+    }
     setDeployError(null);
     setErrorAtPhase(null);
     setErc8004Result(null);
 
     let lastPhase: DeployPhase = 'idle';
     let shouldRefreshWalletBalance = false;
+    const socialSkillArgs = buildSocialSkillArgs(socialConfig, socialSupport);
     const advance = (phase: DeployPhase) => {
       lastPhase = phase;
       setDeployPhase(phase);
@@ -98,6 +245,7 @@ export const AgentWizard: React.FC = () => {
         persona: persona.trim(),
         modelProvider: model,
         skills: selectedSkills,
+        skillArgs: socialSkillArgs,
         creatorAddress: userWalletAddress || undefined,
       });
       setCreatedAgentId(agent.id);
@@ -237,8 +385,9 @@ export const AgentWizard: React.FC = () => {
       setDeployError(err.message || 'Deployment failed');
       setDeployPhase('error');
     } finally {
+      await queryClient.invalidateQueries({ queryKey: ['walletBalance'] });
       if (shouldRefreshWalletBalance) {
-        queryClient.invalidateQueries({ queryKey: ['walletBalance'] });
+        await queryClient.refetchQueries({ queryKey: ['walletBalance'] });
       }
     }
   }, [
@@ -247,6 +396,10 @@ export const AgentWizard: React.FC = () => {
     persona,
     model,
     selectedSkills,
+    socialConfig,
+    socialSupport,
+    socialStepIndex,
+    socialValidationErrors,
     onChainConfig,
     userWalletAddress,
     sendMNT,
@@ -264,13 +417,13 @@ export const AgentWizard: React.FC = () => {
       <div className="mb-8">
         <h1 className="text-xl font-bold text-foreground">Create Agent</h1>
         <p className="text-sm text-muted-foreground">
-          Configure your agent in {STEPS.length} steps
+          Configure your agent in {steps.length} steps
         </p>
       </div>
 
       {/* Step indicators */}
       <div className="mb-8 flex items-center gap-1">
-        {STEPS.map((label, i) => (
+        {steps.map((label, i) => (
           <React.Fragment key={label}>
             <button
               onClick={() => !isDeploying && i < step && setStep(i)}
@@ -298,7 +451,7 @@ export const AgentWizard: React.FC = () => {
               </span>
               <span className="hidden sm:inline">{label}</span>
             </button>
-            {i < STEPS.length - 1 && (
+            {i < steps.length - 1 && (
               <div
                 className={cn(
                   'h-px flex-1',
@@ -330,7 +483,29 @@ export const AgentWizard: React.FC = () => {
             onSkillsChange={setSelectedSkills}
           />
         )}
-        {step === 2 && (
+        {step === socialStepIndex && socialSupport.any && (
+          <StepSocial
+            config={socialConfig}
+            support={socialSupport}
+            onChange={setSocialConfig}
+            onTestConnection={async (platform, token) => {
+              try {
+                const result = await api.testSocialConnection(platform, token);
+                const account = result.account as { username?: string; id?: string } | null;
+                const label =
+                  account?.username || account?.id
+                    ? `Connected as ${account.username || account.id}.`
+                    : 'Connection test succeeded.';
+                return { ok: true, message: label };
+              } catch (err) {
+                const message =
+                  err instanceof api.ApiError ? err.message : 'Connection test failed';
+                return { ok: false, message };
+              }
+            }}
+          />
+        )}
+        {step === onChainStepIndex && (
           <StepOnChain
             config={onChainConfig}
             onChange={setOnChainConfig}
@@ -338,7 +513,7 @@ export const AgentWizard: React.FC = () => {
             agentName={name}
           />
         )}
-        {step === 3 && (
+        {step === reviewStepIndex && (
           <StepReview
             name={name}
             persona={persona}
@@ -346,6 +521,8 @@ export const AgentWizard: React.FC = () => {
             selectedSkills={selectedSkills}
             skills={skills || []}
             onChainConfig={onChainConfig}
+            socialConfig={socialConfig}
+            socialSupport={socialSupport}
             deployPhase={deployPhase}
             deployError={deployError}
             errorAtPhase={errorAtPhase}
@@ -354,6 +531,12 @@ export const AgentWizard: React.FC = () => {
           />
         )}
       </div>
+
+      {step === socialStepIndex && socialValidationErrors.length > 0 && (
+        <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-sm text-red-400">
+          {socialValidationErrors[0]}
+        </div>
+      )}
 
       {/* Navigation buttons */}
       <div className="flex gap-3">
@@ -369,7 +552,7 @@ export const AgentWizard: React.FC = () => {
 
         <div className="flex-1" />
 
-        {step < STEPS.length - 1 && (
+        {step < steps.length - 1 && (
           <button
             type="button"
             onClick={() => setStep(step + 1)}
@@ -385,7 +568,7 @@ export const AgentWizard: React.FC = () => {
           </button>
         )}
 
-        {step === STEPS.length - 1 && deployPhase === 'idle' && (
+        {step === steps.length - 1 && deployPhase === 'idle' && (
           <button
             type="button"
             onClick={handleDeploy}
