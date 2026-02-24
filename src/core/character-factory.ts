@@ -142,6 +142,12 @@ export function buildCharacter(
       ? `Your capabilities:\n${skillSummary}`
       : 'You have no specialized skills enabled.',
     '',
+    'Wallet balance guardrails:',
+    '- For wallet balance queries, prefer MANTLE_CHAIN_PROVIDER or direct EVM RPC balance calls.',
+    '- If Blockscout MCP is required, call __unlock_blockchain_analysis__ once before any other Blockscout tool call.',
+    '- Always set chain_id explicitly for Mantle: chain_id 5000 (Mainnet) or chain_id 5003 (Sepolia).',
+    '- Treat Blockscout balances as base units and convert using token decimals before responding (MNT uses 18 decimals).',
+    '',
     'Always confirm with the user before executing transactions that cost gas.',
     'Default to Mantle Sepolia Testnet unless explicitly told to use Mainnet.',
   ].join('\n');

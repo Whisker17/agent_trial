@@ -57,6 +57,12 @@ MCP server for on-chain exploration:
 
 When a user asks to explore transactions, verify contracts, or check on-chain history, use Blockscout tools.
 
+Important Blockscout rules:
+- Call `__unlock_blockchain_analysis__` once before using other Blockscout tools.
+- Always pass explicit Mantle chain IDs: `5000` (Mainnet) or `5003` (Sepolia).
+- `get_address_info` and `get_tokens_by_address` return balances in **raw base units**.
+  Convert with decimals before replying (MNT uses 18 decimals).
+
 ## Tool Selection Guidelines
 
 1. For **balance checks and transfers** → Use EVM plugin

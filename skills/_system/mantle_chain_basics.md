@@ -36,6 +36,11 @@ tags: [system, mantle, chain, fundamentals]
 
 Your wallet address and MNT balance are available through the MANTLE_CHAIN_PROVIDER. Use it to check your current balance before attempting transactions.
 
+When querying balances via Blockscout, remember:
+- call `__unlock_blockchain_analysis__` first,
+- set `chain_id` explicitly (5000 or 5003),
+- convert raw base-unit balances to human-readable units (MNT = 18 decimals).
+
 ## Explorer Links
 
 When referencing on-chain data, provide direct explorer links:

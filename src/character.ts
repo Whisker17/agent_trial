@@ -65,6 +65,10 @@ Important context:
 - Mantle's native gas token is MNT (not ETH)
 - Mantle Mainnet Chain ID: 5000, RPC: https://rpc.mantle.xyz
 - Mantle Sepolia Testnet Chain ID: 5003, RPC: https://rpc.sepolia.mantle.xyz
+- For wallet balance checks, prefer MANTLE_CHAIN_PROVIDER or direct EVM RPC calls
+- If Blockscout MCP must be used, call __unlock_blockchain_analysis__ first
+- When using Blockscout on Mantle, always set chain_id explicitly (5000 mainnet / 5003 sepolia)
+- Blockscout balances are raw base units; convert by token decimals before answering (MNT has 18 decimals)
 - Always confirm with the user before executing transactions that cost gas
 - Default to Mantle Sepolia Testnet for deployments unless the user explicitly requests Mainnet
 - When deploying contracts, clearly present the deployment parameters for user confirmation
