@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { chatWithAgent } from '../api';
+import { useState, useCallback, useEffect } from 'react';
+import { chatWithAgent, fetchChatHistory } from '../api';
 
 export interface ChatMessage {
   id: string;
@@ -13,20 +13,57 @@ export interface ChatMessage {
 export function useChat(agentId: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isSending, setIsSending] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMessages([]);
+    setIsLoadingHistory(true);
+
+    fetchChatHistory(agentId)
+      .then((history) => {
+        if (cancelled) return;
+        setMessages(
+          history.map((message) => ({
+            id: message.id,
+            role: message.role,
+            text: message.text,
+            timestamp: message.timestamp,
+            actions: message.actions,
+            error: message.error,
+          })),
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMessages([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoadingHistory(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId]);
 
   const sendMessage = useCallback(
     async (text: string) => {
+      const normalizedText = text.trim();
+      if (!normalizedText) return;
+
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
-        text,
+        text: normalizedText,
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, userMsg]);
       setIsSending(true);
 
       try {
-        const response = await chatWithAgent(agentId, text);
+        const response = await chatWithAgent(agentId, normalizedText);
         const agentMsg: ChatMessage = {
           id: crypto.randomUUID(),
           role: 'agent',
@@ -51,5 +88,5 @@ export function useChat(agentId: string) {
     [agentId],
   );
 
-  return { messages, sendMessage, isSending };
+  return { messages, sendMessage, isSending, isLoadingHistory };
 }

@@ -286,6 +286,26 @@ export async function deployToken(
   return data.token;
 }
 
+export interface PersistedChatMessage {
+  id: string;
+  role: 'user' | 'agent' | 'system';
+  text: string;
+  timestamp: number;
+  actions: string[];
+  error: boolean;
+}
+
+export async function fetchChatHistory(id: string): Promise<PersistedChatMessage[]> {
+  const headers = await authHeaders();
+  const data = await json<{ messages: PersistedChatMessage[] }>(
+    await fetch(`${API}/agents/${id}/chat`, {
+      method: 'GET',
+      headers,
+    }),
+  );
+  return data.messages;
+}
+
 export async function chatWithAgent(
   id: string,
   message: string,

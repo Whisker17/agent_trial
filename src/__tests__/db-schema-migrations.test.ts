@@ -16,5 +16,6 @@ describe('database schema migrations', () => {
     expect(source).toContain('CREATE TABLE IF NOT EXISTS agent_plugins');
     expect(source).toContain('CREATE TABLE IF NOT EXISTS agent_plugin_versions');
     expect(source).toContain('CREATE TABLE IF NOT EXISTS marketplace_apis');
+    expect(source).toContain('CREATE TABLE IF NOT EXISTS agent_chat_messages');
   });
 });

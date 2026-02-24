@@ -9,7 +9,7 @@ import { WalletDisplay } from '../components/WalletDisplay';
 export const AgentChat: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { data: agent, isLoading } = useAgent(id!);
-  const { messages, sendMessage, isSending } = useChat(id!);
+  const { messages, sendMessage, isSending, isLoadingHistory } = useChat(id!);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -80,7 +80,13 @@ export const AgentChat: React.FC = () => {
       {/* Messages */}
       <div ref={scrollAreaRef} onScroll={handleScroll} className="flex-1 overflow-y-auto scrollbar-thin">
         <div className="mx-auto max-w-3xl py-4">
-          {messages.length === 0 && !notRunning && (
+          {isLoadingHistory && (
+            <div className="flex items-center justify-center py-12">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted border-t-primary" />
+            </div>
+          )}
+
+          {messages.length === 0 && !notRunning && !isLoadingHistory && (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-7 w-7 text-primary">
@@ -119,7 +125,7 @@ export const AgentChat: React.FC = () => {
       <div className="mx-auto w-full max-w-3xl">
         <ChatInput
           onSend={sendMessage}
-          disabled={isSending || notRunning}
+          disabled={isSending || notRunning || isLoadingHistory}
           placeholder={`Message ${agent.name}...`}
         />
       </div>

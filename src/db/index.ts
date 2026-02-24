@@ -171,6 +171,23 @@ function runMigrations(db: DatabaseClient): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_marketplace_apis_agent_id ON marketplace_apis(agent_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_marketplace_apis_status ON marketplace_apis(status)');
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_chat_messages (
+      id          TEXT PRIMARY KEY,
+      agent_id    TEXT NOT NULL,
+      role        TEXT NOT NULL,
+      text        TEXT NOT NULL,
+      actions     TEXT NOT NULL DEFAULT '[]',
+      is_error    INTEGER NOT NULL DEFAULT 0,
+      timestamp   INTEGER NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_agent_timestamp ON agent_chat_messages(agent_id, timestamp)',
+  );
+
   const cols = db.query("PRAGMA table_info(agents)").all() as { name: string }[];
   const colNames = new Set(cols.map((c) => c.name));
 

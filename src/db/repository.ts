@@ -159,6 +159,95 @@ export function setAgentStatus(id: string, status: AgentStatus): void {
   db.run("UPDATE agents SET status = ?, updated_at = datetime('now') WHERE id = ?", [status, id]);
 }
 
+interface ChatMessageRow {
+  id: string;
+  agent_id: string;
+  role: string;
+  text: string;
+  actions: string;
+  is_error: number;
+  timestamp: number;
+  created_at: string;
+}
+
+export interface PersistedChatMessage {
+  id: string;
+  agentId: string;
+  role: 'user' | 'agent' | 'system';
+  text: string;
+  actions: string[];
+  error: boolean;
+  timestamp: number;
+  createdAt: string;
+}
+
+function parseActions(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((value) => typeof value === 'string');
+  } catch {
+    return [];
+  }
+}
+
+function chatMessageRowToRecord(row: ChatMessageRow): PersistedChatMessage {
+  return {
+    id: row.id,
+    agentId: row.agent_id,
+    role: row.role as PersistedChatMessage['role'],
+    text: row.text,
+    actions: parseActions(row.actions),
+    error: row.is_error === 1,
+    timestamp: row.timestamp,
+    createdAt: row.created_at,
+  };
+}
+
+export function createChatMessage(params: {
+  id?: string;
+  agentId: string;
+  role: PersistedChatMessage['role'];
+  text: string;
+  actions?: string[];
+  error?: boolean;
+  timestamp?: number;
+}): PersistedChatMessage {
+  const db = getDatabase();
+  const id = params.id ?? crypto.randomUUID();
+  const timestamp = params.timestamp ?? Date.now();
+  db.run(
+    `INSERT INTO agent_chat_messages (id, agent_id, role, text, actions, is_error, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      params.agentId,
+      params.role,
+      params.text,
+      JSON.stringify(params.actions ?? []),
+      params.error ? 1 : 0,
+      timestamp,
+    ],
+  );
+  const row = db
+    .query('SELECT * FROM agent_chat_messages WHERE id = ?')
+    .get(id) as ChatMessageRow | null;
+  if (!row) {
+    throw new Error('Failed to persist chat message');
+  }
+  return chatMessageRowToRecord(row);
+}
+
+export function listChatMessages(agentId: string): PersistedChatMessage[] {
+  const db = getDatabase();
+  const rows = db
+    .query(
+      'SELECT * FROM agent_chat_messages WHERE agent_id = ? ORDER BY timestamp ASC, created_at ASC, id ASC',
+    )
+    .all(agentId) as ChatMessageRow[];
+  return rows.map(chatMessageRowToRecord);
+}
+
 interface SkillRow {
   id: string;
   name: string;
