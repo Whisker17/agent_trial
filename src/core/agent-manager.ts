@@ -1,4 +1,13 @@
-import { AgentRuntime, type IAgentRuntime, resolvePlugins } from '@elizaos/core';
+import {
+  AgentRuntime,
+  type Content,
+  type IAgentRuntime,
+  type Memory,
+  type UUID,
+  resolvePlugins,
+  stringToUuid,
+  validateUuid,
+} from '@elizaos/core';
 import { decrypt } from './crypto.ts';
 import { buildCharacter } from './character-factory.ts';
 import type { SkillRegistry } from './skill-registry.ts';
@@ -30,6 +39,28 @@ function patchGetSettingForObjects(runtime: IAgentRuntime): void {
     }
     return null;
   };
+}
+
+const CLIENT_CHAT_SOURCE = 'client_chat';
+
+function getContentText(content: Content | null | undefined): string | null {
+  if (!content) return null;
+
+  const text = typeof content.text === 'string' ? content.text.trim() : '';
+  return text.length > 0 ? text : null;
+}
+
+function getLatestMessageText(messages: Memory[] | undefined): string | null {
+  if (!Array.isArray(messages) || messages.length === 0) return null;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const text = getContentText(messages[index]?.content);
+    if (text) return text;
+  }
+  return null;
+}
+
+function toStableUuid(value: string, namespace: string): UUID {
+  return validateUuid(value) ?? stringToUuid(`${namespace}:${value}`);
 }
 
 export class AgentManager {
@@ -114,15 +145,85 @@ export class AgentManager {
     console.log(`[agent-manager] Stopped agent ${agentId}`);
   }
 
-  async chat(agentId: string, message: string, _userId?: string): Promise<string> {
+  async chat(
+    agentId: string,
+    message: string,
+    userId?: string,
+    sessionId?: string,
+  ): Promise<string> {
     const entry = this.running.get(agentId);
     if (!entry) throw new Error('Agent is not running');
 
     try {
-      const result = await entry.runtime.generateText(message, {
-        includeCharacter: true,
+      const runtime = entry.runtime as unknown as IAgentRuntime;
+      const messageService = runtime.messageService;
+      if (!messageService) {
+        throw new Error('Message service is not initialized');
+      }
+
+      const normalizedSessionId =
+        typeof sessionId === 'string' && sessionId.trim().length > 0
+          ? sessionId.trim()
+          : `default:${agentId}`;
+      const roomId = toStableUuid(
+        normalizedSessionId,
+        `chat-room:${agentId}`,
+      );
+
+      const normalizedUserId =
+        typeof userId === 'string' && userId.trim().length > 0
+          ? userId.trim()
+          : `anonymous:${agentId}`;
+      const entityId = toStableUuid(
+        normalizedUserId,
+        `chat-user:${agentId}`,
+      );
+
+      const userMessage: Memory = {
+        entityId,
+        agentId: runtime.agentId,
+        roomId,
+        createdAt: Date.now(),
+        content: {
+          text: message,
+          source: CLIENT_CHAT_SOURCE,
+        },
+      };
+
+      await runtime.ensureConnection({
+        entityId,
+        roomId,
+        worldId: roomId,
+        source: CLIENT_CHAT_SOURCE,
+        channelId: roomId,
       });
-      return result.text;
+
+      const callbackTexts: string[] = [];
+      const callback = async (content: Content) => {
+        const callbackText = getContentText(content);
+        if (callbackText) callbackTexts.push(callbackText);
+        return [];
+      };
+
+      const handleMessage = async () =>
+        messageService.handleMessage(runtime, userMessage, callback);
+
+      const withEntityContext = (runtime as any).withEntityContext;
+      const processing =
+        typeof withEntityContext === 'function'
+          ? await withEntityContext.call(runtime, entityId, handleMessage)
+          : await handleMessage();
+
+      const callbackText = callbackTexts.findLast((text) => text.length > 0) ?? null;
+      const responseMessageText = getLatestMessageText(processing.responseMessages);
+      const responseText = getContentText(processing.responseContent);
+      const text = callbackText ?? responseMessageText ?? responseText;
+
+      if (!text) {
+        throw new Error('Agent returned an empty response');
+      }
+
+      return text;
     } catch (err) {
       console.error(`[agent-manager] Chat error for agent ${agentId}:`, err);
       throw new Error('Failed to generate response');

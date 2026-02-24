@@ -240,6 +240,7 @@ describe("chat history routes", () => {
       text: "pong",
       actions: [],
     });
+    expect(manager.chat).toHaveBeenCalledWith("agent-1", "ping", undefined, "s-1");
     expect(updateChatSession).toHaveBeenCalled();
   });
 });

@@ -127,7 +127,12 @@ export function createChatRoutes(manager: AgentManager) {
         text: normalizedMessage,
       });
 
-      const text = await manager.chat(id, normalizedMessage, userId);
+      const text = await manager.chat(
+        id,
+        normalizedMessage,
+        userId,
+        session.id,
+      );
       repo.createChatMessage({
         agentId: id,
         sessionId: session.id,
