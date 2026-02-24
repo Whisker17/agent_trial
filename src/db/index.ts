@@ -202,9 +202,6 @@ function runMigrations(db: DatabaseClient): void {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_agent_timestamp ON agent_chat_messages(agent_id, timestamp)",
   );
-  db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_session_timestamp ON agent_chat_messages(session_id, timestamp)",
-  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_chat_sessions (
@@ -228,10 +225,13 @@ function runMigrations(db: DatabaseClient): void {
   if (!chatColNames.has("session_id")) {
     db.exec("ALTER TABLE agent_chat_messages ADD COLUMN session_id TEXT");
   }
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_session_timestamp ON agent_chat_messages(session_id, timestamp)",
+  );
 
   const legacyAgents = db
     .query(
-      'SELECT DISTINCT agent_id FROM agent_chat_messages WHERE session_id IS NULL OR TRIM(session_id) = ""',
+      "SELECT DISTINCT agent_id FROM agent_chat_messages WHERE session_id IS NULL OR TRIM(session_id) = ''",
     )
     .all() as { agent_id: string }[];
   for (const row of legacyAgents) {
@@ -270,7 +270,7 @@ function runMigrations(db: DatabaseClient): void {
     }
 
     db.run(
-      'UPDATE agent_chat_messages SET session_id = ? WHERE agent_id = ? AND (session_id IS NULL OR TRIM(session_id) = "")',
+      "UPDATE agent_chat_messages SET session_id = ? WHERE agent_id = ? AND (session_id IS NULL OR TRIM(session_id) = '')",
       [session.id, row.agent_id],
     );
   }
