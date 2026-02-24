@@ -1,7 +1,13 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, basename, relative } from 'node:path';
 import matter from 'gray-matter';
-import type { SkillMetadata, SkillTier, Skill } from '../shared/types.ts';
+import type {
+  SkillMetadata,
+  SkillTier,
+  Skill,
+  SkillRecord,
+} from '../shared/types.ts';
+import * as repo from '../db/repository.ts';
 
 const TIER_DIRS: Record<string, SkillTier> = {
   _system: 'system',
@@ -77,6 +83,27 @@ export class SkillRegistry {
     }
   }
 
+  private skillRecordToSkill(record: SkillRecord): Skill {
+    const metadata: SkillMetadata = {
+      id: record.id,
+      name: record.name,
+      description: record.description,
+      version: record.version,
+      author: record.authorAgent || record.authorUser || '',
+      tags: record.tags,
+      requiresTools: record.requiresTools,
+      arguments: record.arguments,
+      tier: record.tier,
+      isSystem: record.tier === 'system',
+    };
+    return { metadata, content: record.content };
+  }
+
+  private getDbSkill(id: string): Skill | undefined {
+    const record = repo.getSkillRecord(id);
+    return record ? this.skillRecordToSkill(record) : undefined;
+  }
+
   listByTier(tier: SkillTier): SkillMetadata[] {
     return [...this.skills.values()]
       .filter((s) => s.metadata.tier === tier)
@@ -84,9 +111,18 @@ export class SkillRegistry {
   }
 
   listSelectable(): SkillMetadata[] {
-    return [...this.skills.values()]
+    const fsSkills = [...this.skills.values()]
       .filter((s) => s.metadata.tier === 'base' || s.metadata.tier === 'service')
       .map((s) => s.metadata);
+    const dbSkills = repo.listSkillRecords({ visibility: 'public' }).map((r) =>
+      this.skillRecordToSkill(r).metadata,
+    );
+    const seen = new Set(fsSkills.map((s) => s.id));
+    const merged = [...fsSkills];
+    for (const s of dbSkills) {
+      if (!seen.has(s.id)) merged.push(s);
+    }
+    return merged;
   }
 
   listSystem(): SkillMetadata[] {
@@ -94,15 +130,21 @@ export class SkillRegistry {
   }
 
   getSkill(id: string): Skill | undefined {
-    return this.skills.get(id);
+    const fsSkill = this.skills.get(id);
+    if (fsSkill) return fsSkill;
+    return this.getDbSkill(id);
   }
 
   getContent(id: string): string | undefined {
-    return this.skills.get(id)?.content;
+    const fsSkill = this.skills.get(id);
+    if (fsSkill) return fsSkill.content;
+    return this.getDbSkill(id)?.content;
   }
 
   getMetadata(id: string): SkillMetadata | undefined {
-    return this.skills.get(id)?.metadata;
+    const fsSkill = this.skills.get(id);
+    if (fsSkill) return fsSkill.metadata;
+    return this.getDbSkill(id)?.metadata;
   }
 
   getSystemContents(): string[] {
@@ -121,7 +163,48 @@ export class SkillRegistry {
   }
 
   get size(): number {
-    return this.skills.size;
+    const dbRecords = repo.listSkillRecords();
+    const fsIds = new Set(this.skills.keys());
+    const dbOnlyCount = dbRecords.filter((r) => !fsIds.has(r.id)).length;
+    return this.skills.size + dbOnlyCount;
+  }
+
+  createSkill(params: Parameters<typeof repo.createSkill>[0]): SkillRecord {
+    return repo.createSkill(params);
+  }
+
+  updateSkill(
+    id: string,
+    fields: Parameters<typeof repo.updateSkill>[1],
+  ): SkillRecord | null {
+    return repo.updateSkill(id, fields);
+  }
+
+  deleteSkill(id: string): boolean {
+    return repo.deleteSkill(id);
+  }
+
+  listByAgent(agentId: string): SkillMetadata[] {
+    return repo.listSkillsByAgent(agentId).map((r) => this.skillRecordToSkill(r).metadata);
+  }
+
+  listPublic(): SkillMetadata[] {
+    const fsSkills = [...this.skills.values()]
+      .filter((s) => s.metadata.tier === 'base' || s.metadata.tier === 'service')
+      .map((s) => s.metadata);
+    const dbSkills = repo.listSkillRecords({ visibility: 'public' }).map((r) =>
+      this.skillRecordToSkill(r).metadata,
+    );
+    const seen = new Set(fsSkills.map((s) => s.id));
+    const merged = [...fsSkills];
+    for (const s of dbSkills) {
+      if (!seen.has(s.id)) merged.push(s);
+    }
+    return merged;
+  }
+
+  forkSkill(params: Parameters<typeof repo.forkSkill>[0]): SkillRecord {
+    return repo.forkSkill(params);
   }
 }
 

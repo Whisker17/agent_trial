@@ -1,5 +1,5 @@
 import React from 'react';
-import type { SkillMeta } from '../../api';
+import type { SkillMeta, SocialConfigPayload } from '../../api';
 import type { OnChainConfig } from './StepOnChain';
 
 export type DeployPhase =
@@ -19,6 +19,8 @@ interface StepReviewProps {
   selectedSkills: string[];
   skills: SkillMeta[];
   onChainConfig: OnChainConfig;
+  socialConfig: SocialConfigPayload;
+  socialSupport: { any: boolean; telegram: boolean; discord: boolean };
   deployPhase: DeployPhase;
   deployError: string | null;
   errorAtPhase: DeployPhase | null;
@@ -56,6 +58,8 @@ export const StepReview: React.FC<StepReviewProps> = ({
   selectedSkills,
   skills,
   onChainConfig,
+  socialConfig,
+  socialSupport,
   deployPhase,
   deployError,
   errorAtPhase,
@@ -66,6 +70,10 @@ export const StepReview: React.FC<StepReviewProps> = ({
   const skillNames = selectedSkills
     .map((id) => skills.find((s) => s.id === id)?.name || id)
     .join(', ');
+  const enabledSocialPlatforms = [
+    ...(socialSupport.telegram && socialConfig.telegram.enabled ? ['Telegram'] : []),
+    ...(socialSupport.discord && socialConfig.discord.enabled ? ['Discord'] : []),
+  ];
 
   const activePhases = PHASE_ORDER.filter((p) => {
     if (p === 'funding') return parseFloat(onChainConfig.fundAmount) > 0;
@@ -90,6 +98,16 @@ export const StepReview: React.FC<StepReviewProps> = ({
         <Row label="Persona" value={persona.length > 120 ? persona.slice(0, 120) + '...' : persona} />
         <Row label="Model" value={model} />
         <Row label="Skills" value={skillNames || 'None selected (system skills only)'} />
+        {socialSupport.any && (
+          <Row
+            label="Social"
+            value={
+              enabledSocialPlatforms.length > 0
+                ? `${enabledSocialPlatforms.join(' + ')} (${socialConfig.base.commandPrefix} commands)`
+                : 'Configured but disabled'
+            }
+          />
+        )}
         {onChainConfig.enableErc8004 && (
           <Row
             label="ERC-8004"

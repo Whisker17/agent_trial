@@ -1,17 +1,9 @@
-import { noProxyFetch } from './core/no-proxy-fetch.ts';
+import { configureNetworkBootstrap } from './core/network-bootstrap.ts';
 import { createApp } from './server/app.ts';
 import { getDatabase } from './db/index.ts';
 
-// Replace Bun's native fetch globally. Bun on macOS auto-detects system proxy
-// via CFNetwork, causing UnsupportedProxyProtocol. noProxyFetch uses node:https
-// which does not go through CFNetwork.
-globalThis.fetch = noProxyFetch;
-
-process.env.NO_PROXY = '*';
-process.env.no_proxy = '*';
-for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) {
-  delete process.env[k];
-}
+// Bun still needs no-proxy transport by default on macOS CFNetwork setups.
+configureNetworkBootstrap({ defaultForceNoProxy: true });
 
 const PORT = Number(process.env.PORT) || 3000;
 

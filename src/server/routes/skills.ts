@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { SkillRegistry } from '../../core/skill-registry.ts';
 import type { SkillTier } from '../../shared/types.ts';
+import * as repo from '../../db/repository.ts';
 
 const PUBLIC_TIERS: Set<SkillTier> = new Set(['base', 'service']);
 

@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     working_dir: /app
-    command: ["bun", "dev"]
+    command: ["npm", "run", "dev"]
     env_file: .env
     environment:
       PORT: "3000"
@@ -20,7 +20,7 @@ services:
       dockerfile: Dockerfile.dev
     working_dir: /app
     command:
-      ["bun", "dev:frontend", "--", "--host", "0.0.0.0", "--port", "5173"]
+      ["npm", "run", "dev:frontend", "--", "--host", "0.0.0.0", "--port", "5173"]
     env_file: .env
     environment:
       VITE_API_PROXY_TARGET: "http://backend:3000"

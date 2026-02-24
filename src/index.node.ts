@@ -1,16 +1,9 @@
 import { serve } from '@hono/node-server';
-import { noProxyFetch } from './core/no-proxy-fetch.ts';
+import { configureNetworkBootstrap } from './core/network-bootstrap.ts';
 import { createApp } from './server/app.ts';
 import { getDatabase } from './db/index.ts';
 
-// Force all outbound HTTP calls through our transport implementation.
-globalThis.fetch = noProxyFetch;
-
-process.env.NO_PROXY = '*';
-process.env.no_proxy = '*';
-for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) {
-  delete process.env[k];
-}
+configureNetworkBootstrap();
 
 const PORT = Number(process.env.PORT) || 3000;
 

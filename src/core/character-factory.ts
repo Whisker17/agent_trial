@@ -1,6 +1,8 @@
 import type { Character } from '@elizaos/core';
 import type { SkillRegistry } from './skill-registry.ts';
 import type { AgentRecord } from '../shared/types.ts';
+import { decrypt } from './crypto.ts';
+import { readSocialConfigFromSkillArgs, toSkillArgsMap } from '../server/social-config.ts';
 
 const MCP_SERVERS = {
   'eth-mcp': {
@@ -15,8 +17,8 @@ const MCP_SERVERS = {
   },
   blockscout: {
     type: 'stdio' as const,
-    command: 'npx',
-    args: ['-y', '@blockscout/mcp-server'],
+    command: 'docker',
+    args: ['run', '--rm', '-i', 'ghcr.io/blockscout/mcp-server:latest'],
   },
 };
 
@@ -31,12 +33,31 @@ function resolveModelPlugin(provider: string): string {
   }
 }
 
+function parseSkillArgs(rawSkillArgs: string): Record<string, Record<string, string>> {
+  if (!rawSkillArgs) return {};
+  try {
+    return toSkillArgsMap(JSON.parse(rawSkillArgs));
+  } catch {
+    return {};
+  }
+}
+
+function toCsv(values: string[]): string {
+  return uniqueValues(values).join(',');
+}
+
+function uniqueValues(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
 export function buildCharacter(
   record: AgentRecord,
   decryptedPrivateKey: string,
   registry: SkillRegistry,
 ): Character {
   const skillIds: string[] = JSON.parse(record.skills);
+  const skillArgs = parseSkillArgs(record.skillArgs);
+  const { config: socialConfig } = readSocialConfigFromSkillArgs(skillArgs, { decrypt });
   const systemContents = registry.getSystemContents();
   const selectedContents = registry.resolveSkillContents(skillIds);
   const selectedMetas = skillIds
@@ -50,6 +71,64 @@ export function buildCharacter(
   const sqlSettings = postgresUrl
     ? { POSTGRES_URL: postgresUrl }
     : { PGLITE_DATA_DIR: process.env.PGLITE_DATA_DIR || '.eliza/gateway-runtime-db' };
+  const plugins = [
+    '@elizaos/plugin-sql',
+    '@elizaos/plugin-bootstrap',
+    resolveModelPlugin(record.modelProvider),
+  ];
+  const settings: Record<string, unknown> = {
+    ...sqlSettings,
+    chains: { evm: ['mantle', 'mantleSepoliaTestnet'] },
+    mcp: { servers: MCP_SERVERS },
+  };
+  const secrets: Record<string, string> = {
+    EVM_PRIVATE_KEY: decryptedPrivateKey,
+  };
+
+  if (socialConfig.discord.enabled) {
+    const discordToken = socialConfig.discord.botToken.trim();
+    if (discordToken) {
+      plugins.push('@elizaos/plugin-discord');
+      secrets.DISCORD_API_TOKEN = discordToken;
+
+      const allowedChannelIds = toCsv([
+        socialConfig.discord.controlChannelId,
+        socialConfig.discord.notifyChannelId,
+      ]);
+      if (allowedChannelIds) {
+        settings.CHANNEL_IDS = allowedChannelIds;
+      }
+      if (socialConfig.discord.guildId) {
+        settings.DISCORD_GUILD_ID = socialConfig.discord.guildId;
+      }
+      settings.discord = {
+        shouldIgnoreBotMessages: true,
+        shouldIgnoreDirectMessages: false,
+        shouldRespondOnlyToMentions: true,
+        ...(allowedChannelIds
+          ? { allowedChannelIds: allowedChannelIds.split(',') }
+          : {}),
+      };
+    }
+  }
+
+  if (socialConfig.telegram.enabled) {
+    const telegramToken = socialConfig.telegram.botToken.trim();
+    if (telegramToken) {
+      plugins.push('@elizaos/plugin-telegram');
+      secrets.TELEGRAM_BOT_TOKEN = telegramToken;
+
+      const allowedChats = uniqueValues(
+        socialConfig.telegram.defaultChatId
+          ? [...socialConfig.telegram.allowedChatIds, socialConfig.telegram.defaultChatId]
+          : socialConfig.telegram.allowedChatIds,
+      );
+      if (allowedChats.length > 0) {
+        settings.TELEGRAM_ALLOWED_CHATS = JSON.stringify(allowedChats);
+      }
+    }
+  }
+  plugins.push('@elizaos/plugin-evm', '@fleek-platform/eliza-plugin-mcp');
 
   const systemPrompt = [
     record.persona,
@@ -74,21 +153,9 @@ export function buildCharacter(
     system: systemPrompt,
     bio: [record.persona],
     knowledge,
-    plugins: [
-      '@elizaos/plugin-sql',
-      '@elizaos/plugin-bootstrap',
-      resolveModelPlugin(record.modelProvider),
-      '@elizaos/plugin-evm',
-      '@fleek-platform/eliza-plugin-mcp',
-    ],
-    settings: {
-      ...sqlSettings,
-      chains: { evm: ['mantle', 'mantleSepoliaTestnet'] },
-      mcp: { servers: MCP_SERVERS },
-    },
-    secrets: {
-      EVM_PRIVATE_KEY: decryptedPrivateKey,
-    },
+    plugins,
+    settings,
+    secrets,
     topics: [
       'Mantle blockchain',
       'smart contracts',

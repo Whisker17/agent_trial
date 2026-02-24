@@ -26,7 +26,11 @@ export function useCreateAgent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: api.createAgent,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ['agents'] }),
+        qc.invalidateQueries({ queryKey: ['walletBalance'] }),
+      ]),
   });
 }
 
