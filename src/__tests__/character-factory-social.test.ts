@@ -92,7 +92,7 @@ describe('buildCharacter social app wiring', () => {
     expect(character.plugins).toContain('@elizaos/plugin-telegram');
     expect((character.secrets as Record<string, string>)?.TELEGRAM_BOT_TOKEN).toBe(token);
     expect((character.settings as Record<string, string>)?.TELEGRAM_ALLOWED_CHATS).toBe(
-      '-100123456,10002',
+      '["-100123456","10002"]',
     );
   });
 });

@@ -43,7 +43,11 @@ function parseSkillArgs(rawSkillArgs: string): Record<string, Record<string, str
 }
 
 function toCsv(values: string[]): string {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].join(',');
+  return uniqueValues(values).join(',');
+}
+
+function uniqueValues(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 export function buildCharacter(
@@ -114,13 +118,13 @@ export function buildCharacter(
       plugins.push('@elizaos/plugin-telegram');
       secrets.TELEGRAM_BOT_TOKEN = telegramToken;
 
-      const allowedChats = toCsv(
+      const allowedChats = uniqueValues(
         socialConfig.telegram.defaultChatId
           ? [...socialConfig.telegram.allowedChatIds, socialConfig.telegram.defaultChatId]
           : socialConfig.telegram.allowedChatIds,
       );
-      if (allowedChats) {
-        settings.TELEGRAM_ALLOWED_CHATS = allowedChats;
+      if (allowedChats.length > 0) {
+        settings.TELEGRAM_ALLOWED_CHATS = JSON.stringify(allowedChats);
       }
     }
   }
