@@ -38,6 +38,12 @@ export class AgentManager {
 
   constructor(registry: SkillRegistry) {
     this.registry = registry;
+    const reconciled = repo.setAllRunningAgentsStopped();
+    if (reconciled > 0) {
+      console.warn(
+        `[agent-manager] Reconciled ${reconciled} stale running agent status record(s) to stopped on boot.`,
+      );
+    }
   }
 
   async start(agentId: string): Promise<void> {

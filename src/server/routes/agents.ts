@@ -598,8 +598,14 @@ export function createAgentRoutes(manager: AgentManager) {
     const records = repo.listAgents(userId);
     const agents = records.map((r) => {
       const pub = toAgentPublic(r);
-      if (manager.isRunning(r.id) && r.status !== 'running') {
+      if (manager.isRunning(r.id)) {
+        if (r.status !== 'running') {
+          repo.setAgentStatus(r.id, 'running');
+        }
         pub.status = 'running';
+      } else if (r.status === 'running') {
+        repo.setAgentStatus(r.id, 'stopped');
+        pub.status = 'stopped';
       }
       return pub;
     });
@@ -637,6 +643,15 @@ export function createAgentRoutes(manager: AgentManager) {
     if (!record) return c.json({ error: 'Agent not found' }, 404);
 
     const agent = toAgentPublic(record);
+    if (manager.isRunning(id)) {
+      if (record.status !== 'running') {
+        repo.setAgentStatus(id, 'running');
+      }
+      agent.status = 'running';
+    } else if (record.status === 'running') {
+      repo.setAgentStatus(id, 'stopped');
+      agent.status = 'stopped';
+    }
 
     try {
       const [mantleBal, sepoliaBal] = await Promise.all([
@@ -873,8 +888,15 @@ export function createAgentRoutes(manager: AgentManager) {
 
   app.post('/agents/:id/stop', async (c) => {
     const id = c.req.param('id');
+    const userId: string | undefined = c.get('userId');
+    const record = repo.getAgent(id, userId);
+    if (!record) return c.json({ error: 'Agent not found' }, 404);
+
     if (!manager.isRunning(id)) {
-      return c.json({ error: 'Agent is not running' }, 409);
+      if (record.status !== 'stopped') {
+        repo.setAgentStatus(id, 'stopped');
+      }
+      return c.json({ status: 'stopped' });
     }
 
     await manager.stop(id);

@@ -159,6 +159,14 @@ export function setAgentStatus(id: string, status: AgentStatus): void {
   db.run("UPDATE agents SET status = ?, updated_at = datetime('now') WHERE id = ?", [status, id]);
 }
 
+export function setAllRunningAgentsStopped(): number {
+  const db = getDatabase();
+  const result = db.run(
+    "UPDATE agents SET status = 'stopped', updated_at = datetime('now') WHERE status = 'running'",
+  );
+  return Number((result as any).changes ?? 0);
+}
+
 interface ChatMessageRow {
   id: string;
   agent_id: string;
