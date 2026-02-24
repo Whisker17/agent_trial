@@ -1,12 +1,20 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
-import { usePrivy } from '@privy-io/react-auth';
+import React, { useMemo, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAgents } from '../hooks/use-agents';
 import { AgentCard } from '../components/AgentCard';
+import { buildDeleteSweepNotice } from '../utils/delete-sweep-notice';
 
 export const Dashboard: React.FC = () => {
   const { data: agents, isLoading, error } = useAgents();
-  const { user } = usePrivy();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [showDeleteNotice, setShowDeleteNotice] = useState(true);
+  const deleteNotice = useMemo(() => buildDeleteSweepNotice(location.state), [location.state]);
+
+  const dismissDeleteNotice = () => {
+    setShowDeleteNotice(false);
+    navigate('/dashboard', { replace: true, state: null });
+  };
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
@@ -24,6 +32,32 @@ export const Dashboard: React.FC = () => {
           + New Agent
         </Link>
       </div>
+
+      {showDeleteNotice && deleteNotice && (
+        <div className="mb-6 rounded-xl border border-primary/30 bg-primary/10 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">{deleteNotice.title}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{deleteNotice.subtitle}</p>
+              {deleteNotice.transfers.length > 0 && (
+                <ul className="mt-3 space-y-1">
+                  {deleteNotice.transfers.map((line) => (
+                    <li key={line} className="font-mono text-xs text-foreground">
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <button
+              onClick={dismissDeleteNotice}
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {isLoading && (
         <div className="flex items-center justify-center py-20">

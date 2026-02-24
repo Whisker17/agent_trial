@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAgent, useStartAgent, useStopAgent, useDeleteAgent } from '../hooks/use-agents';
 import { WalletDisplay } from '../components/WalletDisplay';
+import { DeleteAgentDialog } from '../components/DeleteAgentDialog';
 import { cn } from '../utils';
 import { ApiError, isDeleteSweepError } from '../api';
 
@@ -25,6 +26,7 @@ export const AgentDetail: React.FC = () => {
   const stopAgent = useStopAgent();
   const deleteAgent = useDeleteAgent();
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -49,15 +51,18 @@ export const AgentDetail: React.FC = () => {
 
   const handleDelete = async () => {
     setDeleteError(null);
-    const ok = confirm(
-      `Delete agent "${agent.name}"?\n\nBefore deletion, the server will attempt to sweep this agent wallet's assets (MNT + configured ERC20 tokens on Mantle Mainnet and Sepolia) to your creator address.\n\nDeletion is blocked if any transfer fails.`,
-    );
-    if (!ok) return;
 
     try {
-      await deleteAgent.mutateAsync(agent.id);
-      navigate('/dashboard');
+      const result = await deleteAgent.mutateAsync(agent.id);
+      setDeleteDialogOpen(false);
+      navigate('/dashboard', {
+        state: {
+          deletedAgentName: agent.name,
+          deleteSweep: result.sweep,
+        },
+      });
     } catch (err: unknown) {
+      setDeleteDialogOpen(false);
       if (isDeleteSweepError(err)) {
         setDeleteError(`${err.message}\n${JSON.stringify(err.details, null, 2)}`);
         return;
@@ -124,7 +129,7 @@ export const AgentDetail: React.FC = () => {
           </>
         )}
         <button
-          onClick={handleDelete}
+          onClick={() => setDeleteDialogOpen(true)}
           disabled={deleteAgent.isPending}
           className="rounded-lg border border-red-500/30 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-50 transition-colors ml-auto"
         >
@@ -145,6 +150,14 @@ export const AgentDetail: React.FC = () => {
 
       {/* Wallet */}
       <WalletDisplay address={agent.walletAddress} balance={agent.balance} />
+
+      <DeleteAgentDialog
+        open={deleteDialogOpen}
+        agentName={agent.name}
+        pending={deleteAgent.isPending}
+        onCancel={() => setDeleteDialogOpen(false)}
+        onConfirm={handleDelete}
+      />
 
       {/* Config */}
       <div className="space-y-4">

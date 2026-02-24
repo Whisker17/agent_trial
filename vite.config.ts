@@ -5,6 +5,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_API_PROXY_TARGET = 'http://localhost:3000';
+
+export function getApiProxyTarget(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.VITE_API_PROXY_TARGET?.trim();
+  return configured || DEFAULT_API_PROXY_TARGET;
+}
 
 export default defineConfig({
   plugins: [tailwindcss(), react()],
@@ -34,7 +40,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api/': {
-        target: 'http://localhost:3000',
+        target: getApiProxyTarget(),
         changeOrigin: true,
       },
     },

@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePrivy } from '@privy-io/react-auth';
+import { useQueryClient } from '@tanstack/react-query';
 import { decodeEventLog, formatEther, parseEther } from 'viem';
 import { useSkills } from '../hooks/use-agents';
 import { usePrivyWallet } from '../hooks/use-privy-wallet';
@@ -46,6 +47,7 @@ interface Erc8004Result {
 export const AgentWizard: React.FC = () => {
   const navigate = useNavigate();
   const { user } = usePrivy();
+  const queryClient = useQueryClient();
   const { data: skills, isLoading: loadingSkills } = useSkills();
   const { address: userWalletAddress, getWalletClient, getPublicClient, sendMNT } =
     usePrivyWallet();
@@ -83,6 +85,7 @@ export const AgentWizard: React.FC = () => {
     setErc8004Result(null);
 
     let lastPhase: DeployPhase = 'idle';
+    let shouldRefreshWalletBalance = false;
     const advance = (phase: DeployPhase) => {
       lastPhase = phase;
       setDeployPhase(phase);
@@ -108,6 +111,7 @@ export const AgentWizard: React.FC = () => {
           onChainConfig.fundAmount,
           onChainConfig.erc8004Network,
         );
+        shouldRefreshWalletBalance = true;
       }
 
       if (onChainConfig.enableErc8004) {
@@ -137,6 +141,7 @@ export const AgentWizard: React.FC = () => {
           functionName: 'register',
           args: [agentURI],
         });
+        shouldRefreshWalletBalance = true;
 
         const receipt = await publicClient.waitForTransactionReceipt({ hash });
         let registeredAgentId: string | null = null;
@@ -211,6 +216,7 @@ export const AgentWizard: React.FC = () => {
 
           try {
             await sendMNT(details.fundTo, topupAmount, details.network);
+            shouldRefreshWalletBalance = true;
           } catch (topupErr: any) {
             throw new Error(
               `Top-up to agent wallet was not completed on ${chainName}. Required shortfall: ${details.shortfallMnt} MNT to ${details.fundTo}. ${topupErr?.message || ''}`.trim(),
@@ -230,6 +236,10 @@ export const AgentWizard: React.FC = () => {
       setErrorAtPhase(lastPhase);
       setDeployError(err.message || 'Deployment failed');
       setDeployPhase('error');
+    } finally {
+      if (shouldRefreshWalletBalance) {
+        queryClient.invalidateQueries({ queryKey: ['walletBalance'] });
+      }
     }
   }, [
     deployPhase,
@@ -243,6 +253,7 @@ export const AgentWizard: React.FC = () => {
     getWalletClient,
     getPublicClient,
     navigate,
+    queryClient,
   ]);
 
   const isDeploying =

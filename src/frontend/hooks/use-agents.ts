@@ -1,4 +1,9 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query';
 import * as api from '../api';
 
 export function useAgents() {
@@ -51,6 +56,13 @@ export function useDeleteAgent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: api.deleteAgent,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+    onSuccess: () => invalidateAfterAgentDelete(qc),
   });
+}
+
+export async function invalidateAfterAgentDelete(qc: QueryClient) {
+  await Promise.all([
+    qc.invalidateQueries({ queryKey: ['agents'] }),
+    qc.invalidateQueries({ queryKey: ['walletBalance'] }),
+  ]);
 }

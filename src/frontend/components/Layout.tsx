@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { usePrivy, useWallets, useFundWallet } from '@privy-io/react-auth';
+import { useQuery } from '@tanstack/react-query';
 import { createPublicClient, http, formatEther } from 'viem';
 import { mantle, mantleSepoliaTestnet } from 'viem/chains';
 import { cn } from '../utils';
@@ -27,7 +28,6 @@ function AccountMenu() {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [network, setNetwork] = useState<NetworkKey>('mantleSepolia');
-  const [balance, setBalance] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,28 +40,25 @@ function AccountMenu() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [open]);
 
-  useEffect(() => {
-    if (!userWallet) return;
-    setBalance(null);
-    const chain = CHAINS[network];
-    const client = createPublicClient({ chain, transport: http() });
-    let cancelled = false;
-    client
-      .getBalance({ address: userWallet.address as `0x${string}` })
-      .then((b) => {
-        if (!cancelled) {
-          const raw = formatEther(b);
-          const truncated = parseFloat(raw).toFixed(4);
-          setBalance(truncated);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setBalance(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [userWallet?.address, network]);
+  const balanceQuery = useQuery({
+    queryKey: ['walletBalance', userWallet?.address, network],
+    enabled: !!userWallet?.address,
+    queryFn: async () => {
+      if (!userWallet?.address) return null;
+      try {
+        const chain = CHAINS[network];
+        const client = createPublicClient({ chain, transport: http() });
+        const balanceWei = await client.getBalance({
+          address: userWallet.address as `0x${string}`,
+        });
+        const raw = formatEther(balanceWei);
+        return parseFloat(raw).toFixed(4);
+      } catch {
+        return null;
+      }
+    },
+  });
+  const balance = balanceQuery.data ?? null;
 
   if (!userWallet) {
     return (
