@@ -90,6 +90,87 @@ function runMigrations(db: DatabaseClient): void {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS skills (
+      id            TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      description   TEXT NOT NULL DEFAULT '',
+      content       TEXT NOT NULL DEFAULT '',
+      version       TEXT NOT NULL DEFAULT '1.0.0',
+      tier          TEXT NOT NULL DEFAULT 'base',
+      author_agent  TEXT,
+      author_user   TEXT,
+      visibility    TEXT NOT NULL DEFAULT 'private',
+      tags          TEXT NOT NULL DEFAULT '[]',
+      requires_tools TEXT NOT NULL DEFAULT '[]',
+      arguments     TEXT NOT NULL DEFAULT '{}',
+      contract      TEXT,
+      fork_of       TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_skills_visibility ON skills(visibility)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_skills_tier ON skills(tier)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_skills_author_agent ON skills(author_agent)');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_plugins (
+      id                TEXT PRIMARY KEY,
+      agent_id          TEXT NOT NULL,
+      skill_id          TEXT NOT NULL,
+      name              TEXT NOT NULL,
+      description       TEXT NOT NULL DEFAULT '',
+      source_code       TEXT NOT NULL DEFAULT '',
+      status            TEXT NOT NULL DEFAULT 'draft',
+      active_version_id TEXT,
+      error_msg         TEXT,
+      created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_plugins_agent_id ON agent_plugins(agent_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_plugins_skill_id ON agent_plugins(skill_id)');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_plugin_versions (
+      id          TEXT PRIMARY KEY,
+      plugin_id   TEXT NOT NULL,
+      version     INTEGER NOT NULL,
+      source_code TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'draft',
+      error_msg   TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(plugin_id, version)
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_plugin_versions_plugin_id ON agent_plugin_versions(plugin_id)');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS marketplace_apis (
+      id              TEXT PRIMARY KEY,
+      agent_id        TEXT NOT NULL,
+      name            TEXT NOT NULL,
+      description     TEXT NOT NULL,
+      endpoint        TEXT NOT NULL,
+      schema          TEXT,
+      skill_ids       TEXT NOT NULL DEFAULT '[]',
+      tags            TEXT NOT NULL DEFAULT '[]',
+      price_per_call  TEXT,
+      payment_token   TEXT,
+      status          TEXT NOT NULL DEFAULT 'draft',
+      call_count      INTEGER NOT NULL DEFAULT 0,
+      avg_response_ms REAL,
+      success_rate    REAL,
+      last_active_at  TEXT,
+      min_reputation  INTEGER,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_marketplace_apis_agent_id ON marketplace_apis(agent_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_marketplace_apis_status ON marketplace_apis(status)');
+
   const cols = db.query("PRAGMA table_info(agents)").all() as { name: string }[];
   const colNames = new Set(cols.map((c) => c.name));
 
