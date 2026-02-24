@@ -50,6 +50,7 @@ describe("chat history routes", () => {
       updateChatSession: () => null,
       createChatMessage: mock(),
       createChatSession: mock(),
+      deleteChatSession: mock(() => false),
     });
 
     const manager = {
@@ -106,6 +107,7 @@ describe("chat history routes", () => {
       createChatMessage: mock(),
       updateChatSession: () => null,
       createChatSession: mock(),
+      deleteChatSession: mock(() => false),
     });
 
     const manager = {
@@ -151,6 +153,7 @@ describe("chat history routes", () => {
       }),
       createChatMessage: mock(),
       updateChatSession: () => null,
+      deleteChatSession: mock(() => false),
     });
 
     const manager = {
@@ -200,6 +203,7 @@ describe("chat history routes", () => {
       }),
       createChatMessage,
       updateChatSession,
+      deleteChatSession: mock(() => false),
     });
 
     const manager = {
@@ -242,5 +246,77 @@ describe("chat history routes", () => {
     });
     expect(manager.chat).toHaveBeenCalledWith("agent-1", "ping", undefined, "s-1");
     expect(updateChatSession).toHaveBeenCalled();
+  });
+
+  it("deletes a chat session and returns success", async () => {
+    const deleteChatSession = mock(() => true);
+    const createChatRoutes = await loadCreateChatRoutes({
+      getAgent: () => ({ id: "agent-1" }),
+      listChatSessions: () => [],
+      getChatSession: () => null,
+      listChatMessages: () => [],
+      ensureChatSession: () => ({
+        id: "s-1",
+        agentId: "agent-1",
+        title: "Scoped chat",
+        lastMessageAt: 1710000001000,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      }),
+      createChatMessage: mock(),
+      updateChatSession: () => null,
+      createChatSession: mock(),
+      deleteChatSession,
+    });
+
+    const manager = {
+      isRunning: () => false,
+      chat: mock(async () => "unused"),
+    };
+    const app = createChatRoutes(manager as any);
+
+    const res = await app.request("/agents/agent-1/chat/sessions/s-1", {
+      method: "DELETE",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true });
+    expect(deleteChatSession).toHaveBeenCalledWith("agent-1", "s-1");
+  });
+
+  it("returns 404 when deleting a missing session", async () => {
+    const deleteChatSession = mock(() => false);
+    const createChatRoutes = await loadCreateChatRoutes({
+      getAgent: () => ({ id: "agent-1" }),
+      listChatSessions: () => [],
+      getChatSession: () => null,
+      listChatMessages: () => [],
+      ensureChatSession: () => ({
+        id: "s-1",
+        agentId: "agent-1",
+        title: "Scoped chat",
+        lastMessageAt: 1710000001000,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      }),
+      createChatMessage: mock(),
+      updateChatSession: () => null,
+      createChatSession: mock(),
+      deleteChatSession,
+    });
+
+    const manager = {
+      isRunning: () => false,
+      chat: mock(async () => "unused"),
+    };
+    const app = createChatRoutes(manager as any);
+
+    const res = await app.request("/agents/agent-1/chat/sessions/s-404", {
+      method: "DELETE",
+    });
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Chat session not found" });
+    expect(deleteChatSession).toHaveBeenCalledWith("agent-1", "s-404");
   });
 });

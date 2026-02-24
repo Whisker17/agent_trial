@@ -44,6 +44,18 @@ export function createChatRoutes(manager: AgentManager) {
     );
   });
 
+  app.delete("/agents/:id/chat/sessions/:sessionId", async (c) => {
+    const id = c.req.param("id");
+    const sessionId = c.req.param("sessionId");
+    const record = repo.getAgent(id);
+    if (!record) return c.json({ error: "Agent not found" }, 404);
+
+    const deleted = repo.deleteChatSession(id, sessionId);
+    if (!deleted) return c.json({ error: "Chat session not found" }, 404);
+
+    return c.json({ success: true });
+  });
+
   app.get("/agents/:id/chat", async (c) => {
     const id = c.req.param("id");
     const record = repo.getAgent(id);

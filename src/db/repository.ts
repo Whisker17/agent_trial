@@ -391,6 +391,26 @@ export function createChatMessage(params: {
   return chatMessageRowToRecord(row);
 }
 
+export function deleteChatSession(agentId: string, sessionId: string): boolean {
+  const db = getDatabase();
+  const executeDeletion = db.transaction((agentIdArg: string, sessionIdArg: string) => {
+    const deletedSession = db.run(
+      "DELETE FROM agent_chat_sessions WHERE id = ? AND agent_id = ?",
+      [sessionIdArg, agentIdArg],
+    );
+    const sessionDeleted = Number((deletedSession as any).changes ?? 0) > 0;
+    if (!sessionDeleted) return false;
+
+    db.run(
+      "DELETE FROM agent_chat_messages WHERE agent_id = ? AND session_id = ?",
+      [agentIdArg, sessionIdArg],
+    );
+    return true;
+  });
+
+  return executeDeletion(agentId, sessionId);
+}
+
 export function listChatMessages(
   agentId: string,
   sessionId: string,

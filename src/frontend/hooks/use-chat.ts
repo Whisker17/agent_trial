@@ -4,6 +4,7 @@ import {
   fetchChatHistory,
   fetchChatSessions,
   createChatSession,
+  deleteChatSession as deleteChatSessionRequest,
   type ChatSession,
   type PersistedChatMessage,
 } from "../api";
@@ -25,6 +26,9 @@ export function useChat(agentId: string) {
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
+    null,
+  );
 
   const toUiMessage = useCallback(
     (message: PersistedChatMessage): ChatMessage => {
@@ -67,6 +71,7 @@ export function useChat(agentId: string) {
     setSessions([]);
     setActiveSessionId(null);
     setMessages([]);
+    setDeletingSessionId(null);
     setIsLoadingSessions(true);
     setIsLoadingHistory(true);
 
@@ -138,6 +143,46 @@ export function useChat(agentId: string) {
     }
   }, [agentId, isCreatingSession, upsertSession]);
 
+  const deleteSession = useCallback(
+    async (sessionId: string) => {
+      if (deletingSessionId === sessionId) return;
+      if (!sessions.some((session) => session.id === sessionId)) return;
+
+      const wasActive = activeSessionId === sessionId;
+      setDeletingSessionId(sessionId);
+      try {
+        await deleteChatSessionRequest(agentId, sessionId);
+        const remaining = sessions
+          .filter((session) => session.id !== sessionId)
+          .sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+        setSessions(remaining);
+
+        if (!wasActive) return;
+
+        const nextSession = remaining[0] ?? null;
+        if (!nextSession) {
+          setActiveSessionId(null);
+          setMessages([]);
+          setIsLoadingHistory(false);
+          return;
+        }
+
+        await loadSession(nextSession.id);
+      } finally {
+        setDeletingSessionId((current) =>
+          current === sessionId ? null : current,
+        );
+      }
+    },
+    [
+      activeSessionId,
+      agentId,
+      deletingSessionId,
+      loadSession,
+      sessions,
+    ],
+  );
+
   const sendMessage = useCallback(
     async (text: string) => {
       const normalizedText = text.trim();
@@ -205,9 +250,11 @@ export function useChat(agentId: string) {
     sendMessage,
     selectSession,
     startNewChat,
+    deleteSession,
     isSending,
     isLoadingHistory,
     isLoadingSessions,
     isCreatingSession,
+    deletingSessionId,
   };
 }

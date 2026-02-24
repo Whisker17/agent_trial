@@ -29,14 +29,19 @@ export const AgentChat: React.FC = () => {
     sendMessage,
     selectSession,
     startNewChat,
+    deleteSession,
     isSending,
     isLoadingHistory,
     isLoadingSessions,
     isCreatingSession,
+    deletingSessionId,
   } = useChat(id!);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [sessionActionError, setSessionActionError] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     if (autoScroll) {
@@ -49,6 +54,24 @@ export const AgentChat: React.FC = () => {
     if (!el) return;
     setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
   }, []);
+
+  const handleDeleteSession = useCallback(
+    async (sessionId: string, sessionTitle: string) => {
+      const confirmed = window.confirm(
+        `Delete "${sessionTitle}"? This cannot be undone.`,
+      );
+      if (!confirmed) return;
+
+      setSessionActionError(null);
+      try {
+        await deleteSession(sessionId);
+      } catch (error) {
+        console.error("Failed to delete chat session", error);
+        setSessionActionError("Failed to delete chat. Please try again.");
+      }
+    },
+    [deleteSession],
+  );
 
   if (isLoading) {
     return (
@@ -109,26 +132,62 @@ export const AgentChat: React.FC = () => {
               No chats yet. Start a new one.
             </div>
           )}
-          {sessions.map((session) => (
-            <button
-              key={session.id}
-              type="button"
-              onClick={() => selectSession(session.id)}
-              className={cn(
-                "mb-1.5 w-full rounded-lg border px-3 py-2 text-left transition-colors",
-                session.id === activeSessionId
-                  ? "border-primary/40 bg-primary/10"
-                  : "border-transparent hover:border-border hover:bg-muted/60",
-              )}
-            >
-              <p className="truncate text-xs font-medium text-foreground">
-                {session.title}
-              </p>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                {formatSessionTime(session.lastMessageAt)}
-              </p>
-            </button>
-          ))}
+          {sessions.map((session) => {
+            const isDeleting = deletingSessionId === session.id;
+            return (
+              <div
+                key={session.id}
+                className={cn(
+                  "group mb-1.5 flex items-center gap-1 rounded-lg border px-2 py-1.5 transition-colors",
+                  session.id === activeSessionId
+                    ? "border-primary/40 bg-primary/10"
+                    : "border-transparent hover:border-border hover:bg-muted/60",
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => selectSession(session.id)}
+                  className="min-w-0 flex-1 rounded-md px-1 py-0.5 text-left"
+                >
+                  <p className="truncate text-xs font-medium text-foreground">
+                    {session.title}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {formatSessionTime(session.lastMessageAt)}
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteSession(session.id, session.title)}
+                  disabled={
+                    isDeleting ||
+                    isSending ||
+                    isLoadingSessions ||
+                    isLoadingHistory
+                  }
+                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  title={isDeleting ? "Deleting..." : "Delete chat"}
+                  aria-label={`Delete chat ${session.title}`}
+                >
+                  {isDeleting ? (
+                    <div className="h-3.5 w-3.5 animate-spin rounded-full border border-muted-foreground border-t-transparent" />
+                  ) : (
+                    <svg
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className="h-3.5 w-3.5"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M8.75 2.5a.75.75 0 00-.75.75V4H5.75a.75.75 0 000 1.5h.386l.656 9.192A2 2 0 008.787 16.5h2.426a2 2 0 001.995-1.808l.656-9.192h.386a.75.75 0 000-1.5H12V3.25a.75.75 0 00-.75-.75h-2.5zM10.5 4V3.5h-1V4h1zm-1.685 2.22a.75.75 0 10-1.495.11l.5 6.75a.75.75 0 001.495-.11l-.5-6.75zm4.055.11a.75.75 0 10-1.495-.11l-.5 6.75a.75.75 0 101.495.11l.5-6.75z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            );
+          })}
         </div>
       </aside>
 
@@ -165,6 +224,12 @@ export const AgentChat: React.FC = () => {
           </span>
         </div>
 
+        {sessionActionError && (
+          <div className="border-b border-red-500/20 bg-red-500/5 px-4 py-2 text-xs text-red-400">
+            {sessionActionError}
+          </div>
+        )}
+
         <div className="flex items-center gap-2 border-b border-border px-4 py-2 md:hidden">
           <select
             value={activeSessionId ?? ""}
@@ -188,6 +253,26 @@ export const AgentChat: React.FC = () => {
             className="rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
           >
             New
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const activeSession = sessions.find(
+                (session) => session.id === activeSessionId,
+              );
+              if (!activeSession) return;
+              void handleDeleteSession(activeSession.id, activeSession.title);
+            }}
+            disabled={
+              !activeSessionId ||
+              isSending ||
+              isLoadingHistory ||
+              isLoadingSessions ||
+              deletingSessionId === activeSessionId
+            }
+            className="rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {deletingSessionId === activeSessionId ? "Deleting..." : "Delete"}
           </button>
         </div>
 

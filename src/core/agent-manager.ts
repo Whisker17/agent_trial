@@ -13,6 +13,7 @@ import { buildCharacter } from './character-factory.ts';
 import type { SkillRegistry } from './skill-registry.ts';
 import * as repo from '../db/repository.ts';
 import mantlePlugin from '../plugins/mantle.ts';
+import { patchMcpCallToolAction } from './mcp-call-tool-guardrails.ts';
 
 interface RunningAgent {
   runtime: AgentRuntime;
@@ -89,6 +90,9 @@ export class AgentManager {
     const character = buildCharacter(record, privateKey, this.registry);
     const resolvedCharacterPlugins = await resolvePlugins(character.plugins ?? []);
     const runtimePlugins = [...resolvedCharacterPlugins];
+    for (const plugin of runtimePlugins) {
+      patchMcpCallToolAction(plugin);
+    }
     if (!runtimePlugins.some((plugin) => plugin.name === mantlePlugin.name)) {
       runtimePlugins.push(mantlePlugin);
     }

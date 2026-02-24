@@ -359,6 +359,19 @@ export async function createChatSession(
   return data.session;
 }
 
+export async function deleteChatSession(
+  id: string,
+  sessionId: string,
+): Promise<void> {
+  const headers = await authHeaders();
+  await json<{ success: true }>(
+    await fetch(`${API}/agents/${id}/chat/sessions/${sessionId}`, {
+      method: "DELETE",
+      headers,
+    }),
+  );
+}
+
 export async function fetchChatHistory(
   id: string,
   sessionId?: string,

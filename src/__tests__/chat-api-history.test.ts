@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import {
   createChatSession,
+  deleteChatSession,
   fetchChatHistory,
   fetchChatSessions,
   setAuthTokenGetter,
@@ -139,5 +140,38 @@ describe("chat history api", () => {
     expect(result.session?.id).toBe("s-1");
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]?.sessionId).toBe("s-1");
+  });
+
+  it("deletes a chat session", async () => {
+    const fetchMock = mock(
+      async () =>
+        new Response(
+          JSON.stringify({
+            success: true,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+    );
+
+    setAuthTokenGetter(async () => "token-123");
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    await deleteChatSession("agent-1", "s-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/agents/agent-1/chat/sessions/s-1",
+    );
+    expect(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.method,
+    ).toBe("DELETE");
+    expect(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.headers,
+    ).toEqual({
+      Authorization: "Bearer token-123",
+    });
   });
 });
