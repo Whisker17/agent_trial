@@ -1,8 +1,8 @@
-import BetterSqlite3 from 'better-sqlite3';
-import { existsSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import BetterSqlite3 from "better-sqlite3";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
-const DB_PATH = process.env.DATABASE_PATH || 'data/gateway.db';
+const DB_PATH = process.env.DATABASE_PATH || "data/gateway.db";
 
 type QueryHandle = {
   get: (...params: any[]) => any;
@@ -64,8 +64,8 @@ export function getDatabase(): DatabaseClient {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
   const raw = new BetterSqlite3(DB_PATH);
-  raw.pragma('journal_mode = WAL');
-  raw.pragma('foreign_keys = ON');
+  raw.pragma("journal_mode = WAL");
+  raw.pragma("foreign_keys = ON");
   _db = new BetterSqlite3Adapter(raw);
 
   runMigrations(_db);
@@ -110,9 +110,13 @@ function runMigrations(db: DatabaseClient): void {
       updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
-  db.exec('CREATE INDEX IF NOT EXISTS idx_skills_visibility ON skills(visibility)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_skills_tier ON skills(tier)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_skills_author_agent ON skills(author_agent)');
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_skills_visibility ON skills(visibility)",
+  );
+  db.exec("CREATE INDEX IF NOT EXISTS idx_skills_tier ON skills(tier)");
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_skills_author_agent ON skills(author_agent)",
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_plugins (
@@ -129,8 +133,12 @@ function runMigrations(db: DatabaseClient): void {
       updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
-  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_plugins_agent_id ON agent_plugins(agent_id)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_plugins_skill_id ON agent_plugins(skill_id)');
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_agent_plugins_agent_id ON agent_plugins(agent_id)",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_agent_plugins_skill_id ON agent_plugins(skill_id)",
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_plugin_versions (
@@ -144,7 +152,9 @@ function runMigrations(db: DatabaseClient): void {
       UNIQUE(plugin_id, version)
     )
   `);
-  db.exec('CREATE INDEX IF NOT EXISTS idx_plugin_versions_plugin_id ON agent_plugin_versions(plugin_id)');
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_plugin_versions_plugin_id ON agent_plugin_versions(plugin_id)",
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS marketplace_apis (
@@ -168,13 +178,18 @@ function runMigrations(db: DatabaseClient): void {
       updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
-  db.exec('CREATE INDEX IF NOT EXISTS idx_marketplace_apis_agent_id ON marketplace_apis(agent_id)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_marketplace_apis_status ON marketplace_apis(status)');
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_marketplace_apis_agent_id ON marketplace_apis(agent_id)",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_marketplace_apis_status ON marketplace_apis(status)",
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_chat_messages (
       id          TEXT PRIMARY KEY,
       agent_id    TEXT NOT NULL,
+      session_id  TEXT,
       role        TEXT NOT NULL,
       text        TEXT NOT NULL,
       actions     TEXT NOT NULL DEFAULT '[]',
@@ -185,19 +200,95 @@ function runMigrations(db: DatabaseClient): void {
     )
   `);
   db.exec(
-    'CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_agent_timestamp ON agent_chat_messages(agent_id, timestamp)',
+    "CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_agent_timestamp ON agent_chat_messages(agent_id, timestamp)",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_session_timestamp ON agent_chat_messages(session_id, timestamp)",
   );
 
-  const cols = db.query("PRAGMA table_info(agents)").all() as { name: string }[];
-  const colNames = new Set(cols.map((c) => c.name));
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_chat_sessions (
+      id               TEXT PRIMARY KEY,
+      agent_id         TEXT NOT NULL,
+      title            TEXT NOT NULL,
+      last_message_at  INTEGER NOT NULL,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+    )
+  `);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_agent_chat_sessions_agent_last ON agent_chat_sessions(agent_id, last_message_at)",
+  );
 
-  if (!colNames.has('user_id')) {
-    db.exec('ALTER TABLE agents ADD COLUMN user_id TEXT');
-    db.exec('CREATE INDEX IF NOT EXISTS idx_agents_user_id ON agents(user_id)');
+  const chatCols = db.query("PRAGMA table_info(agent_chat_messages)").all() as {
+    name: string;
+  }[];
+  const chatColNames = new Set(chatCols.map((c) => c.name));
+  if (!chatColNames.has("session_id")) {
+    db.exec("ALTER TABLE agent_chat_messages ADD COLUMN session_id TEXT");
   }
 
-  if (!colNames.has('on_chain_meta')) {
-    db.exec("ALTER TABLE agents ADD COLUMN on_chain_meta TEXT NOT NULL DEFAULT '{}'");
+  const legacyAgents = db
+    .query(
+      'SELECT DISTINCT agent_id FROM agent_chat_messages WHERE session_id IS NULL OR TRIM(session_id) = ""',
+    )
+    .all() as { agent_id: string }[];
+  for (const row of legacyAgents) {
+    const stats = db
+      .query(
+        "SELECT MIN(timestamp) as first_ts, MAX(timestamp) as last_ts FROM agent_chat_messages WHERE agent_id = ?",
+      )
+      .get(row.agent_id) as {
+      first_ts: number | null;
+      last_ts: number | null;
+    } | null;
+    const lastTs = stats?.last_ts ?? Date.now();
+
+    let session = db
+      .query(
+        "SELECT id FROM agent_chat_sessions WHERE agent_id = ? ORDER BY created_at ASC LIMIT 1",
+      )
+      .get(row.agent_id) as { id: string } | null;
+
+    if (!session) {
+      const sessionId = crypto.randomUUID();
+      db.run(
+        `INSERT INTO agent_chat_sessions (id, agent_id, title, last_message_at)
+         VALUES (?, ?, ?, ?)`,
+        [sessionId, row.agent_id, "Imported chat", lastTs],
+      );
+      session = { id: sessionId };
+    } else {
+      db.run(
+        `UPDATE agent_chat_sessions
+         SET last_message_at = CASE WHEN last_message_at < ? THEN ? ELSE last_message_at END,
+             updated_at = datetime('now')
+         WHERE id = ?`,
+        [lastTs, lastTs, session.id],
+      );
+    }
+
+    db.run(
+      'UPDATE agent_chat_messages SET session_id = ? WHERE agent_id = ? AND (session_id IS NULL OR TRIM(session_id) = "")',
+      [session.id, row.agent_id],
+    );
+  }
+
+  const cols = db.query("PRAGMA table_info(agents)").all() as {
+    name: string;
+  }[];
+  const colNames = new Set(cols.map((c) => c.name));
+
+  if (!colNames.has("user_id")) {
+    db.exec("ALTER TABLE agents ADD COLUMN user_id TEXT");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_agents_user_id ON agents(user_id)");
+  }
+
+  if (!colNames.has("on_chain_meta")) {
+    db.exec(
+      "ALTER TABLE agents ADD COLUMN on_chain_meta TEXT NOT NULL DEFAULT '{}'",
+    );
   }
 }
 

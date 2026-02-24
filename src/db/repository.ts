@@ -1,5 +1,9 @@
-import { getDatabase } from './index.ts';
-import type { AgentRecord, AgentStatus, AgentOnChainMeta } from '../shared/types.ts';
+import { getDatabase } from "./index.ts";
+import type {
+  AgentRecord,
+  AgentStatus,
+  AgentOnChainMeta,
+} from "../shared/types.ts";
 
 interface AgentRow {
   id: string;
@@ -74,11 +78,13 @@ export function getAgent(id: string, userId?: string): AgentRecord | null {
   const db = getDatabase();
   if (userId) {
     const row = db
-      .query('SELECT * FROM agents WHERE id = ? AND user_id = ?')
+      .query("SELECT * FROM agents WHERE id = ? AND user_id = ?")
       .get(id, userId) as AgentRow | null;
     return row ? rowToRecord(row) : null;
   }
-  const row = db.query('SELECT * FROM agents WHERE id = ?').get(id) as AgentRow | null;
+  const row = db
+    .query("SELECT * FROM agents WHERE id = ?")
+    .get(id) as AgentRow | null;
   return row ? rowToRecord(row) : null;
 }
 
@@ -86,11 +92,13 @@ export function listAgents(userId?: string): AgentRecord[] {
   const db = getDatabase();
   if (userId) {
     const rows = db
-      .query('SELECT * FROM agents WHERE user_id = ? ORDER BY created_at DESC')
+      .query("SELECT * FROM agents WHERE user_id = ? ORDER BY created_at DESC")
       .all(userId) as AgentRow[];
     return rows.map(rowToRecord);
   }
-  const rows = db.query('SELECT * FROM agents ORDER BY created_at DESC').all() as AgentRow[];
+  const rows = db
+    .query("SELECT * FROM agents ORDER BY created_at DESC")
+    .all() as AgentRow[];
   return rows.map(rowToRecord);
 }
 
@@ -111,31 +119,31 @@ export function updateAgent(
   const values: any[] = [];
 
   if (fields.name !== undefined) {
-    sets.push('name = ?');
+    sets.push("name = ?");
     values.push(fields.name);
   }
   if (fields.persona !== undefined) {
-    sets.push('persona = ?');
+    sets.push("persona = ?");
     values.push(fields.persona);
   }
   if (fields.modelProvider !== undefined) {
-    sets.push('model_provider = ?');
+    sets.push("model_provider = ?");
     values.push(fields.modelProvider);
   }
   if (fields.skills !== undefined) {
-    sets.push('skills = ?');
+    sets.push("skills = ?");
     values.push(JSON.stringify(fields.skills));
   }
   if (fields.skillArgs !== undefined) {
-    sets.push('skill_args = ?');
+    sets.push("skill_args = ?");
     values.push(JSON.stringify(fields.skillArgs));
   }
   if (fields.status !== undefined) {
-    sets.push('status = ?');
+    sets.push("status = ?");
     values.push(fields.status);
   }
   if (fields.onChainMeta !== undefined) {
-    sets.push('on_chain_meta = ?');
+    sets.push("on_chain_meta = ?");
     values.push(JSON.stringify(fields.onChainMeta));
   }
 
@@ -144,19 +152,22 @@ export function updateAgent(
   sets.push("updated_at = datetime('now')");
   values.push(id);
 
-  db.run(`UPDATE agents SET ${sets.join(', ')} WHERE id = ?`, values);
+  db.run(`UPDATE agents SET ${sets.join(", ")} WHERE id = ?`, values);
   return getAgent(id);
 }
 
 export function deleteAgent(id: string): boolean {
   const db = getDatabase();
-  const result = db.run('DELETE FROM agents WHERE id = ?', [id]);
+  const result = db.run("DELETE FROM agents WHERE id = ?", [id]);
   return (result as any).changes > 0;
 }
 
 export function setAgentStatus(id: string, status: AgentStatus): void {
   const db = getDatabase();
-  db.run("UPDATE agents SET status = ?, updated_at = datetime('now') WHERE id = ?", [status, id]);
+  db.run(
+    "UPDATE agents SET status = ?, updated_at = datetime('now') WHERE id = ?",
+    [status, id],
+  );
 }
 
 export function setAllRunningAgentsStopped(): number {
@@ -170,6 +181,7 @@ export function setAllRunningAgentsStopped(): number {
 interface ChatMessageRow {
   id: string;
   agent_id: string;
+  session_id: string;
   role: string;
   text: string;
   actions: string;
@@ -178,10 +190,29 @@ interface ChatMessageRow {
   created_at: string;
 }
 
+interface ChatSessionRow {
+  id: string;
+  agent_id: string;
+  title: string;
+  last_message_at: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PersistedChatSession {
+  id: string;
+  agentId: string;
+  title: string;
+  lastMessageAt: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PersistedChatMessage {
   id: string;
   agentId: string;
-  role: 'user' | 'agent' | 'system';
+  sessionId: string;
+  role: "user" | "agent" | "system";
   text: string;
   actions: string[];
   error: boolean;
@@ -189,11 +220,22 @@ export interface PersistedChatMessage {
   createdAt: string;
 }
 
+function sessionRowToRecord(row: ChatSessionRow): PersistedChatSession {
+  return {
+    id: row.id,
+    agentId: row.agent_id,
+    title: row.title,
+    lastMessageAt: row.last_message_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function parseActions(raw: string): string[] {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((value) => typeof value === 'string');
+    return parsed.filter((value) => typeof value === "string");
   } catch {
     return [];
   }
@@ -203,7 +245,8 @@ function chatMessageRowToRecord(row: ChatMessageRow): PersistedChatMessage {
   return {
     id: row.id,
     agentId: row.agent_id,
-    role: row.role as PersistedChatMessage['role'],
+    sessionId: row.session_id,
+    role: row.role as PersistedChatMessage["role"],
     text: row.text,
     actions: parseActions(row.actions),
     error: row.is_error === 1,
@@ -212,10 +255,105 @@ function chatMessageRowToRecord(row: ChatMessageRow): PersistedChatMessage {
   };
 }
 
+export function listChatSessions(agentId: string): PersistedChatSession[] {
+  const db = getDatabase();
+  const rows = db
+    .query(
+      `SELECT * FROM agent_chat_sessions
+       WHERE agent_id = ?
+       ORDER BY last_message_at DESC, updated_at DESC, created_at DESC`,
+    )
+    .all(agentId) as ChatSessionRow[];
+  return rows.map(sessionRowToRecord);
+}
+
+export function getChatSession(
+  agentId: string,
+  sessionId: string,
+): PersistedChatSession | null {
+  const db = getDatabase();
+  const row = db
+    .query("SELECT * FROM agent_chat_sessions WHERE id = ? AND agent_id = ?")
+    .get(sessionId, agentId) as ChatSessionRow | null;
+  return row ? sessionRowToRecord(row) : null;
+}
+
+export function createChatSession(params: {
+  id?: string;
+  agentId: string;
+  title?: string;
+  lastMessageAt?: number;
+}): PersistedChatSession {
+  const db = getDatabase();
+  const id = params.id ?? crypto.randomUUID();
+  const lastMessageAt = params.lastMessageAt ?? Date.now();
+  db.run(
+    `INSERT INTO agent_chat_sessions (id, agent_id, title, last_message_at)
+     VALUES (?, ?, ?, ?)`,
+    [id, params.agentId, params.title?.trim() || "New chat", lastMessageAt],
+  );
+  const row = db
+    .query("SELECT * FROM agent_chat_sessions WHERE id = ?")
+    .get(id) as ChatSessionRow | null;
+  if (!row) {
+    throw new Error("Failed to create chat session");
+  }
+  return sessionRowToRecord(row);
+}
+
+export function ensureChatSession(
+  agentId: string,
+  sessionId?: string,
+): PersistedChatSession {
+  if (sessionId) {
+    const found = getChatSession(agentId, sessionId);
+    if (!found) {
+      throw new Error("Chat session not found");
+    }
+    return found;
+  }
+
+  const existing = listChatSessions(agentId)[0];
+  if (existing) return existing;
+  return createChatSession({ agentId });
+}
+
+export function updateChatSession(params: {
+  id: string;
+  agentId: string;
+  title?: string;
+  lastMessageAt?: number;
+}): PersistedChatSession | null {
+  const db = getDatabase();
+  const sets: string[] = [];
+  const values: unknown[] = [];
+
+  if (params.title !== undefined) {
+    sets.push("title = ?");
+    values.push(params.title.trim() || "New chat");
+  }
+  if (params.lastMessageAt !== undefined) {
+    sets.push("last_message_at = ?");
+    values.push(params.lastMessageAt);
+  }
+  if (sets.length === 0) {
+    return getChatSession(params.agentId, params.id);
+  }
+
+  sets.push("updated_at = datetime('now')");
+  values.push(params.id, params.agentId);
+  db.run(
+    `UPDATE agent_chat_sessions SET ${sets.join(", ")} WHERE id = ? AND agent_id = ?`,
+    values,
+  );
+  return getChatSession(params.agentId, params.id);
+}
+
 export function createChatMessage(params: {
   id?: string;
   agentId: string;
-  role: PersistedChatMessage['role'];
+  sessionId: string;
+  role: PersistedChatMessage["role"];
   text: string;
   actions?: string[];
   error?: boolean;
@@ -225,11 +363,12 @@ export function createChatMessage(params: {
   const id = params.id ?? crypto.randomUUID();
   const timestamp = params.timestamp ?? Date.now();
   db.run(
-    `INSERT INTO agent_chat_messages (id, agent_id, role, text, actions, is_error, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO agent_chat_messages (id, agent_id, session_id, role, text, actions, is_error, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       params.agentId,
+      params.sessionId,
       params.role,
       params.text,
       JSON.stringify(params.actions ?? []),
@@ -237,22 +376,33 @@ export function createChatMessage(params: {
       timestamp,
     ],
   );
+  db.run(
+    `UPDATE agent_chat_sessions
+     SET last_message_at = ?, updated_at = datetime('now')
+     WHERE id = ? AND agent_id = ?`,
+    [timestamp, params.sessionId, params.agentId],
+  );
   const row = db
-    .query('SELECT * FROM agent_chat_messages WHERE id = ?')
+    .query("SELECT * FROM agent_chat_messages WHERE id = ?")
     .get(id) as ChatMessageRow | null;
   if (!row) {
-    throw new Error('Failed to persist chat message');
+    throw new Error("Failed to persist chat message");
   }
   return chatMessageRowToRecord(row);
 }
 
-export function listChatMessages(agentId: string): PersistedChatMessage[] {
+export function listChatMessages(
+  agentId: string,
+  sessionId: string,
+): PersistedChatMessage[] {
   const db = getDatabase();
   const rows = db
     .query(
-      'SELECT * FROM agent_chat_messages WHERE agent_id = ? ORDER BY timestamp ASC, created_at ASC, id ASC',
+      `SELECT * FROM agent_chat_messages
+       WHERE agent_id = ? AND session_id = ?
+       ORDER BY timestamp ASC, created_at ASC, id ASC`,
     )
-    .all(agentId) as ChatMessageRow[];
+    .all(agentId, sessionId) as ChatMessageRow[];
   return rows.map(chatMessageRowToRecord);
 }
 
@@ -321,11 +471,11 @@ export function createSkill(params: {
       params.name,
       params.description,
       params.content,
-      params.version ?? '1.0.0',
-      params.tier ?? 'base',
+      params.version ?? "1.0.0",
+      params.tier ?? "base",
       params.authorAgent ?? null,
       params.authorUser ?? null,
-      params.visibility ?? 'private',
+      params.visibility ?? "private",
       JSON.stringify(params.tags ?? []),
       JSON.stringify(params.requiresTools ?? []),
       JSON.stringify(params.arguments ?? {}),
@@ -338,7 +488,9 @@ export function createSkill(params: {
 
 export function getSkillRecord(id: string): SkillRecord | null {
   const db = getDatabase();
-  const row = db.query('SELECT * FROM skills WHERE id = ?').get(id) as SkillRow | null;
+  const row = db
+    .query("SELECT * FROM skills WHERE id = ?")
+    .get(id) as SkillRow | null;
   return row ? skillRowToRecord(row) : null;
 }
 
@@ -351,18 +503,19 @@ export function listSkillRecords(opts?: {
   const conditions: string[] = [];
   const values: unknown[] = [];
   if (opts?.tier !== undefined) {
-    conditions.push('tier = ?');
+    conditions.push("tier = ?");
     values.push(opts.tier);
   }
   if (opts?.visibility !== undefined) {
-    conditions.push('visibility = ?');
+    conditions.push("visibility = ?");
     values.push(opts.visibility);
   }
   if (opts?.authorAgent !== undefined) {
-    conditions.push('author_agent = ?');
+    conditions.push("author_agent = ?");
     values.push(opts.authorAgent);
   }
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const where =
+    conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const rows = db
     .query(`SELECT * FROM skills ${where} ORDER BY created_at DESC`)
     .all(...values) as SkillRow[];
@@ -387,58 +540,60 @@ export function updateSkill(
   const sets: string[] = [];
   const values: unknown[] = [];
   if (fields.name !== undefined) {
-    sets.push('name = ?');
+    sets.push("name = ?");
     values.push(fields.name);
   }
   if (fields.description !== undefined) {
-    sets.push('description = ?');
+    sets.push("description = ?");
     values.push(fields.description);
   }
   if (fields.content !== undefined) {
-    sets.push('content = ?');
+    sets.push("content = ?");
     values.push(fields.content);
   }
   if (fields.version !== undefined) {
-    sets.push('version = ?');
+    sets.push("version = ?");
     values.push(fields.version);
   }
   if (fields.visibility !== undefined) {
-    sets.push('visibility = ?');
+    sets.push("visibility = ?");
     values.push(fields.visibility);
   }
   if (fields.tags !== undefined) {
-    sets.push('tags = ?');
+    sets.push("tags = ?");
     values.push(JSON.stringify(fields.tags));
   }
   if (fields.requiresTools !== undefined) {
-    sets.push('requires_tools = ?');
+    sets.push("requires_tools = ?");
     values.push(JSON.stringify(fields.requiresTools));
   }
   if (fields.arguments !== undefined) {
-    sets.push('arguments = ?');
+    sets.push("arguments = ?");
     values.push(JSON.stringify(fields.arguments));
   }
   if (fields.contract !== undefined) {
-    sets.push('contract = ?');
+    sets.push("contract = ?");
     values.push(fields.contract ? JSON.stringify(fields.contract) : null);
   }
   if (sets.length === 0) return getSkillRecord(id);
   sets.push("updated_at = datetime('now')");
   values.push(id);
-  db.run(`UPDATE skills SET ${sets.join(', ')} WHERE id = ?`, values);
+  db.run(`UPDATE skills SET ${sets.join(", ")} WHERE id = ?`, values);
   return getSkillRecord(id);
 }
 
 export function deleteSkill(id: string): boolean {
   const db = getDatabase();
-  const result = db.run('DELETE FROM skills WHERE id = ?', [id]);
+  const result = db.run("DELETE FROM skills WHERE id = ?", [id]);
   return (result as any).changes > 0;
 }
 
 export function listSkillsByAgent(agentId: string): SkillRecord[] {
   const db = getDatabase();
   const rows = db
-    .query('SELECT * FROM skills WHERE author_agent = ? ORDER BY created_at DESC')
+    .query(
+      "SELECT * FROM skills WHERE author_agent = ? ORDER BY created_at DESC",
+    )
     .all(agentId) as SkillRow[];
   return rows.map(skillRowToRecord);
 }
@@ -516,8 +671,8 @@ export function createPlugin(params: {
       params.agentId,
       params.skillId,
       params.name,
-      params.description ?? '',
-      params.sourceCode ?? '',
+      params.description ?? "",
+      params.sourceCode ?? "",
     ],
   );
   return getPlugin(params.id)!;
@@ -525,14 +680,18 @@ export function createPlugin(params: {
 
 export function getPlugin(id: string): AgentPlugin | null {
   const db = getDatabase();
-  const row = db.query('SELECT * FROM agent_plugins WHERE id = ?').get(id) as PluginRow | null;
+  const row = db
+    .query("SELECT * FROM agent_plugins WHERE id = ?")
+    .get(id) as PluginRow | null;
   return row ? pluginRowToRecord(row) : null;
 }
 
 export function listPluginsByAgent(agentId: string): AgentPlugin[] {
   const db = getDatabase();
   const rows = db
-    .query('SELECT * FROM agent_plugins WHERE agent_id = ? ORDER BY created_at DESC')
+    .query(
+      "SELECT * FROM agent_plugins WHERE agent_id = ? ORDER BY created_at DESC",
+    )
     .all(agentId) as PluginRow[];
   return rows.map(pluginRowToRecord);
 }
@@ -550,31 +709,31 @@ export function updatePlugin(
   const sets: string[] = [];
   const values: unknown[] = [];
   if (fields.sourceCode !== undefined) {
-    sets.push('source_code = ?');
+    sets.push("source_code = ?");
     values.push(fields.sourceCode);
   }
   if (fields.status !== undefined) {
-    sets.push('status = ?');
+    sets.push("status = ?");
     values.push(fields.status);
   }
   if (fields.activeVersionId !== undefined) {
-    sets.push('active_version_id = ?');
+    sets.push("active_version_id = ?");
     values.push(fields.activeVersionId);
   }
   if (fields.errorMsg !== undefined) {
-    sets.push('error_msg = ?');
+    sets.push("error_msg = ?");
     values.push(fields.errorMsg);
   }
   if (sets.length === 0) return getPlugin(id);
   sets.push("updated_at = datetime('now')");
   values.push(id);
-  db.run(`UPDATE agent_plugins SET ${sets.join(', ')} WHERE id = ?`, values);
+  db.run(`UPDATE agent_plugins SET ${sets.join(", ")} WHERE id = ?`, values);
   return getPlugin(id);
 }
 
 export function deletePlugin(id: string): boolean {
   const db = getDatabase();
-  const result = db.run('DELETE FROM agent_plugins WHERE id = ?', [id]);
+  const result = db.run("DELETE FROM agent_plugins WHERE id = ?", [id]);
   return (result as any).changes > 0;
 }
 
@@ -608,13 +767,21 @@ export function createPluginVersion(params: {
 }): AgentPluginVersion {
   const db = getDatabase();
   const maxRow = db
-    .query('SELECT COALESCE(MAX(version), 0) as max_version FROM agent_plugin_versions WHERE plugin_id = ?')
+    .query(
+      "SELECT COALESCE(MAX(version), 0) as max_version FROM agent_plugin_versions WHERE plugin_id = ?",
+    )
     .get(params.pluginId) as { max_version: number };
   const nextVersion = maxRow.max_version + 1;
   db.run(
     `INSERT INTO agent_plugin_versions (id, plugin_id, version, source_code, status)
      VALUES (?, ?, ?, ?, ?)`,
-    [params.id, params.pluginId, nextVersion, params.sourceCode, params.status ?? 'draft'],
+    [
+      params.id,
+      params.pluginId,
+      nextVersion,
+      params.sourceCode,
+      params.status ?? "draft",
+    ],
   );
   return getPluginVersion(params.id)!;
 }
@@ -622,7 +789,9 @@ export function createPluginVersion(params: {
 export function listPluginVersions(pluginId: string): AgentPluginVersion[] {
   const db = getDatabase();
   const rows = db
-    .query('SELECT * FROM agent_plugin_versions WHERE plugin_id = ? ORDER BY version DESC')
+    .query(
+      "SELECT * FROM agent_plugin_versions WHERE plugin_id = ? ORDER BY version DESC",
+    )
     .all(pluginId) as PluginVersionRow[];
   return rows.map(versionRowToRecord);
 }
@@ -630,7 +799,7 @@ export function listPluginVersions(pluginId: string): AgentPluginVersion[] {
 export function getPluginVersion(id: string): AgentPluginVersion | null {
   const db = getDatabase();
   const row = db
-    .query('SELECT * FROM agent_plugin_versions WHERE id = ?')
+    .query("SELECT * FROM agent_plugin_versions WHERE id = ?")
     .get(id) as PluginVersionRow | null;
   return row ? versionRowToRecord(row) : null;
 }
@@ -716,7 +885,7 @@ export function createMarketplaceApi(params: {
 export function getMarketplaceApi(id: string): MarketplaceApi | null {
   const db = getDatabase();
   const row = db
-    .query('SELECT * FROM marketplace_apis WHERE id = ?')
+    .query("SELECT * FROM marketplace_apis WHERE id = ?")
     .get(id) as MarketplaceRow | null;
   return row ? marketplaceRowToRecord(row) : null;
 }
@@ -730,19 +899,20 @@ export function listMarketplaceApis(opts?: {
   const conditions: string[] = [];
   const values: unknown[] = [];
   if (opts?.agentId !== undefined) {
-    conditions.push('agent_id = ?');
+    conditions.push("agent_id = ?");
     values.push(opts.agentId);
   }
   if (opts?.status !== undefined) {
-    conditions.push('status = ?');
+    conditions.push("status = ?");
     values.push(opts.status);
   }
-  if (opts?.query !== undefined && opts.query.trim() !== '') {
-    conditions.push('(name LIKE ? OR description LIKE ?)');
+  if (opts?.query !== undefined && opts.query.trim() !== "") {
+    conditions.push("(name LIKE ? OR description LIKE ?)");
     const pattern = `%${opts.query}%`;
     values.push(pattern, pattern);
   }
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const where =
+    conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const rows = db
     .query(`SELECT * FROM marketplace_apis ${where} ORDER BY created_at DESC`)
     .all(...values) as MarketplaceRow[];
@@ -765,57 +935,68 @@ export function updateMarketplaceApi(
   const sets: string[] = [];
   const values: unknown[] = [];
   if (fields.name !== undefined) {
-    sets.push('name = ?');
+    sets.push("name = ?");
     values.push(fields.name);
   }
   if (fields.description !== undefined) {
-    sets.push('description = ?');
+    sets.push("description = ?");
     values.push(fields.description);
   }
   if (fields.schema !== undefined) {
-    sets.push('schema = ?');
+    sets.push("schema = ?");
     values.push(fields.schema);
   }
   if (fields.pricePerCall !== undefined) {
-    sets.push('price_per_call = ?');
+    sets.push("price_per_call = ?");
     values.push(fields.pricePerCall);
   }
   if (fields.paymentToken !== undefined) {
-    sets.push('payment_token = ?');
+    sets.push("payment_token = ?");
     values.push(fields.paymentToken);
   }
   if (fields.status !== undefined) {
-    sets.push('status = ?');
+    sets.push("status = ?");
     values.push(fields.status);
   }
   if (fields.minReputation !== undefined) {
-    sets.push('min_reputation = ?');
+    sets.push("min_reputation = ?");
     values.push(fields.minReputation);
   }
   if (sets.length === 0) return getMarketplaceApi(id);
   sets.push("updated_at = datetime('now')");
   values.push(id);
-  db.run(`UPDATE marketplace_apis SET ${sets.join(', ')} WHERE id = ?`, values);
+  db.run(`UPDATE marketplace_apis SET ${sets.join(", ")} WHERE id = ?`, values);
   return getMarketplaceApi(id);
 }
 
 export function deleteMarketplaceApi(id: string): boolean {
   const db = getDatabase();
-  const result = db.run('DELETE FROM marketplace_apis WHERE id = ?', [id]);
+  const result = db.run("DELETE FROM marketplace_apis WHERE id = ?", [id]);
   return (result as any).changes > 0;
 }
 
-export function incrementApiCallCount(id: string, responseMs: number, success: boolean): void {
+export function incrementApiCallCount(
+  id: string,
+  responseMs: number,
+  success: boolean,
+): void {
   const db = getDatabase();
   const row = db
-    .query('SELECT call_count, avg_response_ms, success_rate FROM marketplace_apis WHERE id = ?')
-    .get(id) as { call_count: number; avg_response_ms: number | null; success_rate: number | null } | null;
+    .query(
+      "SELECT call_count, avg_response_ms, success_rate FROM marketplace_apis WHERE id = ?",
+    )
+    .get(id) as {
+    call_count: number;
+    avg_response_ms: number | null;
+    success_rate: number | null;
+  } | null;
   if (!row) return;
   const newCallCount = row.call_count + 1;
   const oldAvgMs = row.avg_response_ms ?? 0;
   const newAvgMs = oldAvgMs + (responseMs - oldAvgMs) / newCallCount;
   const oldSuccessRate = row.success_rate ?? (success ? 1 : 0);
-  const newSuccessRate = oldSuccessRate + ((success ? 1 : 0) - oldSuccessRate) / newCallCount;
+  const newSuccessRate =
+    oldSuccessRate + ((success ? 1 : 0) - oldSuccessRate) / newCallCount;
   db.run(
     `UPDATE marketplace_apis SET call_count = ?, avg_response_ms = ?, success_rate = ?, last_active_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
     [newCallCount, newAvgMs, newSuccessRate, id],
