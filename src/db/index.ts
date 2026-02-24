@@ -18,6 +18,7 @@ export interface DatabaseClient {
   exec: (sql: string) => void;
   run: (sql: string, params?: unknown[] | unknown) => RunResult;
   query: (sql: string) => QueryHandle;
+  transaction: <T extends (...args: any[]) => any>(fn: T) => T;
   close: () => void;
 }
 
@@ -43,6 +44,10 @@ class BetterSqlite3Adapter implements DatabaseClient {
       get: (...params: any[]) => stmt.get(...params),
       all: (...params: any[]) => stmt.all(...params),
     };
+  }
+
+  transaction<T extends (...args: any[]) => any>(fn: T): T {
+    return this.db.transaction(fn as (...args: unknown[]) => unknown) as unknown as T;
   }
 
   close(): void {
