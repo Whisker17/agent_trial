@@ -37,8 +37,8 @@ export const character: Character = {
         },
         blockscout: {
           type: 'stdio',
-          command: 'npx',
-          args: ['-y', '@blockscout/mcp-server'],
+          command: 'docker',
+          args: ['run', '--rm', '-i', 'ghcr.io/blockscout/mcp-server:latest'],
         },
       },
     },

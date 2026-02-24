@@ -17,8 +17,8 @@ const MCP_SERVERS = {
   },
   blockscout: {
     type: 'stdio' as const,
-    command: 'npx',
-    args: ['-y', '@blockscout/mcp-server'],
+    command: 'docker',
+    args: ['run', '--rm', '-i', 'ghcr.io/blockscout/mcp-server:latest'],
   },
 };
 
